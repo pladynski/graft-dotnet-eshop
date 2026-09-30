@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
-    <PackageReference Include="Hypertube.Netcore.Sdk" />
+    <PackageReference Include="graft.nuget.catalog.api_696z8d" />
   </ItemGroup>
 
 </Project>

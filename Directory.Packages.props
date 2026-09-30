@@ -94,6 +94,7 @@
     <PackageVersion Include="Scalar.AspNetCore" Version="2.8.6" />
     <!-- Before license change -->
     <PackageVersion Include="MediatR" Version="13.0.0" />
-    <PackageVersion Include="Hypertube.Netcore.Sdk" Version="3.1.16" />
+    <PackageVersion Include="graft.nuget.catalog.api_696z8d" Version="1.0.0" />
+    <PackageVersion Include="graft.nuget.basket.api_4lefa6" Version="1.0.0" />
   </ItemGroup>
 </Project>

@@ -156,8 +156,8 @@ Product images: browsers need a URL, so the web app maps `GET /product-images/{i
 var uri = $"{remoteServiceBaseUrl}items/{id}";
 return httpClient.GetFromJsonAsync<CatalogItem>(uri);
 
-// after — same CatalogService, CatalogApi.GetItem over the gateway
-return Task.FromResult(Parse<CatalogItem>(Call("GetItem", id)));
+// after — same CatalogService, generated graft called like a local method
+return Task.FromResult(Parse<CatalogItem>(CatalogApi.GetItem(id)));
 ```
 
 The EF query stayed in `CatalogApi`:
@@ -174,26 +174,26 @@ Basket updates no longer build a protobuf request:
 // before — WebApp/Services/BasketService.cs
 await basketClient.UpdateBasketAsync(updatePayload);
 
-// after — same BasketService, public method on eShop.Basket.API.BasketService
-Call("UpdateBasket", await BuyerIdAsync(), payload);
+// after — same BasketService, generated graft
+BasketApi.UpdateBasket(await BuyerIdAsync(), payload);
 ```
 
 ### Why Graftcode
 
-Counted non-blank, non-comment lines against `main`. These are not a percentage reduction. The route table and the gRPC surface went away. The gateway client and host glue added lines.
+Counted non-blank, non-comment lines against `main`. The storefront calls generated Graft packages (`CatalogApi.GetItem`, `BasketApi.UpdateBasket`). It does not open a socket or invoke methods by name.
 
 | Piece | Before | After |
 | --- | ---: | ---: |
 | `MapCatalogApi` route table | 95 | 0 |
 | `CatalogApi.cs` | 389 | 389 |
-| `CatalogService` | 71 | 123 |
+| `CatalogService` | 71 | 90 |
 | `Catalog.API` `Program.cs` | 15 | 7 |
 | gRPC `Basket.API/Grpc/BasketService.cs` | 91 | 0 |
-| `Basket.API/BasketService.cs` | 0 | 150 |
-| Web app `BasketService` | 40 | 120 |
+| `Basket.API/BasketService.cs` | 0 | 159 |
+| Web app `BasketService` | 40 | 92 |
 | `basket.proto` | 24 | 0 |
 
-`CatalogApi.cs` is the same size because the 95-line route table was replaced by public method wrappers and the code that hosts them (DI, JSON, picture bytes). The EF queries did not move to another file. `CatalogService` grew from 71 to 123 lines, and the web app `BasketService` grew from 40 to 120, because each client opens a gateway connection and parses JSON. Together, `CatalogApi.cs` and `CatalogService` went from 460 to 512 non-blank lines.
+`CatalogApi.cs` is the same size because the 95-line route table was replaced by public method wrappers and the code that hosts them. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). Those clients only set `GraftConfig` and parse JSON. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 479 non-blank lines.
 
 Generated OpenAPI documents (`Catalog.API.json`, 1260 lines, and `Catalog.API_v2.json`, 1043 lines) and `Catalog.API.http` left with the route table. They were generated contracts, not the query logic.
 
@@ -246,6 +246,19 @@ dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket
 
 The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets `CATALOG_GRAFT_HOST` and `BASKET_GRAFT_HOST` to `ws://localhost:8000/ws` on the web app. Start the gateway before opening the storefront.
 
+### Install the grafts
+
+With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet, and copy the install command. The packages checked in for this slice were produced that way:
+
+```bash
+dotnet add package graft.nuget.catalog.api_696z8d -v 1.0.0 --source https://grft.dev/51ed3831-b5ff-4f17-95b4-7b21997750ba__free
+dotnet add package graft.nuget.basket.api_4lefa6 -v 1.0.0 --source https://grft.dev/78c14abf-0cee-46be-b443-c50b167d9f93__free
+```
+
+`nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
+
+The generated types are `graft.nuget.eShop.Catalog.API.CatalogApi` and `graft.nuget.eShop.Basket.API.BasketService`. `CatalogService` and the web app `BasketService` set `GraftConfig.Host` (default `ws://localhost:8000/ws`) and call those methods. Basket's DI constructor is private so the graft only contains the static methods. A public constructor of `IBasketRepository` and `ILogger` makes the NuGet graft fail to build.
+
 `CatalogService` and `BasketService` run inside the Blazor Server process, so the storefront does not need browser CORS for these calls. Pass `--corsAllowedOrigins` when a browser client calls the gateway from another origin (the web app launch profile is `http://localhost:5045` and `https://localhost:7298`).
 
 The same public methods are what an MCP client calls. Copy the MCP client configuration from the Graftcode Vision portal. Vision is the module graph, not the MCP endpoint.
@@ -273,9 +286,9 @@ export CATALOG_GRAFT_TRANSPORT=rabbitmq
 export BASKET_GRAFT_TRANSPORT=rabbitmq
 export CATALOG_GRAFT_PLUGIN_HOST=localhost:5672
 export BASKET_GRAFT_PLUGIN_HOST=localhost:5672
-# optional paths; otherwise the clients use the same JSON as the sample files
-export CATALOG_GRAFT_PLUGIN_CONFIG=$PWD/graft/pluginConfig.catalog.rabbitmq.json
-export BASKET_GRAFT_PLUGIN_CONFIG=$PWD/graft/pluginConfig.basket.rabbitmq.json
+# optional; these are GraftConfig.SetConfig documents (configurations.plugin), not the gg --config file
+export CATALOG_GRAFT_PLUGIN_CONFIG=$PWD/graft/graftConfig.catalog.json
+export BASKET_GRAFT_PLUGIN_CONFIG=$PWD/graft/graftConfig.basket.json
 ```
 
 Aspire already starts a RabbitMQ container named `eventbus` for integration events. To run the plugin on that broker, copy its published host port, user, and password from the Aspire dashboard into the sample JSON and into `*_GRAFT_PLUGIN_HOST` (`host:port`). Aspire does not publish guest/guest on port 5672 unless you set that yourself. The event bus and the plugin are different uses of the same broker: order and stock events stay on the event bus; catalog and basket method calls use the plugin queues only when the transport variables are `rabbitmq`.

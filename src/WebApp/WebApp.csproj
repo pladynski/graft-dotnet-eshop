@@ -17,6 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="graft.nuget.basket.api_4lefa6" />
     <PackageReference Include="Asp.Versioning.Http.Client" />
     <PackageReference Include="Aspire.Azure.AI.OpenAI" />
     <PackageReference Include="CommunityToolkit.Aspire.OllamaSharp" />

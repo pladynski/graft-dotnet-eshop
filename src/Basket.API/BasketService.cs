@@ -5,8 +5,19 @@ using eShop.Basket.API.Repositories;
 
 namespace eShop.Basket.API;
 
-public class BasketService(IBasketRepository repository, ILogger<BasketService> logger)
+public class BasketService
 {
+    private readonly IBasketRepository repository;
+    private readonly ILogger<BasketService> logger;
+
+    // Private so the generated graft only sees the public static methods.
+    // A public constructor of IBasketRepository/ILogger makes the graft package fail to build.
+    private BasketService(IBasketRepository repository, ILogger<BasketService> logger)
+    {
+        this.repository = repository;
+        this.logger = logger;
+    }
+
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object Gate = new();
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
@@ -139,7 +150,9 @@ public class BasketService(IBasketRepository repository, ILogger<BasketService> 
             }
 
             await using var scope = provider.CreateAsyncScope();
-            var service = ActivatorUtilities.CreateInstance<BasketService>(scope.ServiceProvider);
+            var service = new BasketService(
+                scope.ServiceProvider.GetRequiredService<IBasketRepository>(),
+                scope.ServiceProvider.GetRequiredService<ILogger<BasketService>>());
             return await action(service).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
 
