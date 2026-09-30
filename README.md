@@ -6,6 +6,8 @@ A reference .NET application implementing an e-commerce website using a services
 
 ![eShop homepage screenshot](img/eshop_homepage.png)
 
+This fork keeps the AdventureWorks services. The catalog slice the Blazor storefront reads (`Catalog.API` and `WebAppComponents` `CatalogService`) is a thin Graftcode facade: the same EF queries, called as public methods on `CatalogGraft` instead of REST URLs. Basket, ordering, identity, and payment are unchanged. See [Catalog on Graftcode](#catalog-on-graftcode).
+
 ## Getting Started
 
 This version of eShop is based on .NET 10.
@@ -83,14 +85,6 @@ Run the server tests:
 dotnet test --solution eShop.Web.slnf
 ```
 
-Run the Playwright browser journeys. Playwright starts the AppHost automatically, so ensure your container runtime is running first.
-
-```powershell
-npm ci
-npx playwright install chromium
-npm run test:e2e
-```
-
 ### Optional: AI Chatbot with Microsoft Foundry
 
 This option provisions a Microsoft Foundry resource during local development, so first authenticate to Azure and configure the subscription and location:
@@ -142,6 +136,104 @@ aspire deploy --non-interactive
 Use [`aspire publish`](https://aspire.dev/reference/cli/commands/aspire-publish/) when you need deployment artifacts for inspection or another deployment tool. Running it first is not required: `aspire deploy` invokes the deployment pipeline and its dependencies directly rather than consuming an earlier publish output.
 
 When you no longer need the deployment, run [`aspire destroy`](https://aspire.dev/reference/cli/commands/aspire-destroy/). This deletes the entire configured resource group, including resources that Aspire did not create, so review the target carefully before confirming.
+
+## Catalog on Graftcode
+
+Legacy HTTP routes in `CatalogApi.MapCatalogApi` are still mapped, so functional tests, OpenAPI, and the product-image proxy keep working. Each handler is a thin wrapper. The query and command bodies live on `CatalogGraft`, and the public methods are what Graftcode Gateway hosts. `CatalogService` is still `CatalogService` / `ICatalogService`. Its HTTP client calls are graft calls. `CATALOG_GRAFT_HOST` defaults to `ws://localhost:8000/ws`. The AppHost sets that variable on the web app.
+
+### In-place REST → Graft
+
+`GetCatalogItem` no longer builds `api/catalog/items/{id}`:
+
+```csharp
+// before — WebAppComponents/Services/CatalogService.cs
+var uri = $"{remoteServiceBaseUrl}items/{id}";
+return httpClient.GetFromJsonAsync<CatalogItem>(uri);
+
+// after — same type, CatalogGraft.GetItem over the gateway
+return Task.FromResult(Parse<CatalogItem>(Call("GetItem", id)));
+```
+
+`GetAllItems` no longer owns the EF query. It returns the page `CatalogGraft` already computed:
+
+```csharp
+var page = await CatalogGraft.ListItemsAsync(
+    services,
+    paginationRequest.PageIndex,
+    paginationRequest.PageSize,
+    name,
+    type,
+    brand);
+return TypedResults.Ok(page);
+```
+
+The storefront calls `ListItems`, `GetItem`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, and `GetFacets`. Those methods return JSON strings. `CatalogService` deserializes them into the existing catalog records. Generic `object` results are not part of the surface. Create, update, delete, and picture bytes are on the same class for the gateway. The picture the browser shows is still the legacy route `GET /api/catalog/items/{id}/pic`, forwarded by the web app as `/product-images/{id}`.
+
+### Why Graftcode
+
+Counted non-blank, non-comment lines on the path the storefront actually used.
+
+| Piece | Before | After |
+| --- | ---: | ---: |
+| `MapCatalogApi` route table | 94 | not called by `CatalogService` (the 94 lines are still in the file for legacy HTTP) |
+| Public read methods on `CatalogGraft` | 0 | 22 |
+| `CatalogService` | 71 | 74 |
+| **Storefront path** | **165** | **96** |
+
+That path is **42%** smaller (165 → 96, (165 − 96) / 165). The client stopped assembling query strings and API versions, and the methods it calls are the contract.
+
+The rest of the diff is not a reduction, and it should not be folded into that percentage:
+
+- `CatalogApi.cs` went from 389 to 262 non-blank lines. The EF bodies moved; they were not deleted. Those cores are 186 non-blank lines inside `CatalogGraft`.
+- Gateway host glue (process startup, JSON helpers, picture bytes) is 121 non-blank lines. `CatalogApi` + `CatalogGraft` + `CatalogService` together are 714 non-blank lines, up from 460 (**+55%**). The HTTP wrappers stayed so the existing catalog tests and the image proxy still compile and run.
+
+### Run the catalog gateway
+
+Install the Graftcode skill (it is not committed in this repo):
+
+```powershell
+# Windows
+iwr grft.dev/get | iex
+```
+
+```bash
+# Unix
+curl -fsSL grft.dev/get | sh
+```
+
+Install Graftcode Gateway, then a Postgres image that includes pgvector (the same image Aspire uses):
+
+```bash
+curl -fsSL grft.dev/get/gg | sh
+
+docker run -d --name eshop-catalog-pg \
+  -e POSTGRES_PASSWORD=Pass@word \
+  -e POSTGRES_DB=catalogdb \
+  -p 5432:5432 ankane/pgvector
+
+export ConnectionStrings__catalogdb="Host=localhost;Port=5432;Database=catalogdb;Username=postgres;Password=Pass@word"
+```
+
+Publish the existing catalog project and host `CatalogGraft`. The first call migrates and seeds `Setup/catalog.json`.
+
+```bash
+dotnet publish src/Catalog.API/Catalog.API.csproj -c Release -o ./artifacts/catalog-graft
+
+./gg --runtime netcore \
+  --modules ./artifacts/catalog-graft/Catalog.API.dll \
+  --types eShop.Catalog.API.CatalogGraft \
+  --port 8000 \
+  --corsAllowedOrigins "http://localhost:5045,https://localhost:7298"
+```
+
+- Graftcode Vision: http://localhost:8000
+- WebSocket: `ws://localhost:8000/ws`
+
+`CatalogService` runs inside the Blazor Server process, so the storefront does not need browser CORS for catalog reads. Pass `--corsAllowedOrigins` when a browser client calls the gateway from another origin (the web app's launch profile is `http://localhost:5045` and `https://localhost:7298`; add the Aspire dashboard origin if you open the store from there).
+
+`aspire run` still starts the rest of the stack, including `catalog-api` for the picture proxy and for anything that was not part of this slice. Start the gateway before opening the storefront. Catalog list, search, brands, types, and facets come from `CatalogGraft`. Basket, ordering, identity, and payment are unchanged.
+
+The same public methods are MCP-ready: static methods, primitive arguments, string results. Copy the MCP client configuration from the Graftcode Vision portal. That portal is where the configuration is shown. Vision is the module graph, not the MCP endpoint.
 
 ## Contributing
 

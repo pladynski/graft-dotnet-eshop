@@ -1,84 +1,94 @@
-﻿using System.Net.Http.Json;
-using System.Web;
+﻿// Graftcode catalog slice — same CatalogService, calls CatalogGraft instead of HTTP.
+using System.Text.Json;
 using eShop.WebAppComponents.Catalog;
+using Hypertube.Netcore.Sdk;
+using Hypertube.Netcore.Utils.ConnectionData;
 
 namespace eShop.WebAppComponents.Services;
 
-public class CatalogService(HttpClient httpClient) : ICatalogService
+public class CatalogService : ICatalogService
 {
-    private readonly string remoteServiceBaseUrl = "api/catalog/";
+    public const string DefaultHost = "ws://localhost:8000/ws";
+    private const string FacadeType = "eShop.Catalog.API.CatalogGraft";
 
-    public Task<CatalogItem?> GetCatalogItem(int id)
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
+    private readonly string _host;
+    private readonly object _gate = new();
+    private InvocationContext? _facade;
+
+    public CatalogService()
     {
-        var uri = $"{remoteServiceBaseUrl}items/{id}";
-        return httpClient.GetFromJsonAsync<CatalogItem>(uri);
+        var configured = Environment.GetEnvironmentVariable("CATALOG_GRAFT_HOST");
+        _host = string.IsNullOrWhiteSpace(configured) ? DefaultHost : configured.Trim();
     }
 
-    public async Task<CatalogResult> GetCatalogItems(int pageIndex, int pageSize, int[]? brands, int[]? types)
-    {
-        var uri = GetAllCatalogItemsUri(remoteServiceBaseUrl, pageIndex, pageSize, brands, types);
-        var result = await httpClient.GetFromJsonAsync<CatalogResult>(uri);
-        return result!;
-    }
+    public Task<CatalogItem?> GetCatalogItem(int id) =>
+        Task.FromResult(Parse<CatalogItem>(Call("GetItem", id)));
 
-    public async Task<List<CatalogItem>> GetCatalogItems(IEnumerable<int> ids)
-    {
-        var uri = $"{remoteServiceBaseUrl}items/by?ids={string.Join("&ids=", ids)}";
-        var result = await httpClient.GetFromJsonAsync<List<CatalogItem>>(uri);
-        return result!;
-    }
+    public Task<CatalogResult> GetCatalogItems(int pageIndex, int pageSize, int[]? brands, int[]? types) =>
+        Task.FromResult(Parse<CatalogResult>(Call(
+            "ListItems",
+            pageIndex,
+            pageSize,
+            string.Empty,
+            Join(types),
+            Join(brands)))!);
 
-    public Task<CatalogResult> GetCatalogItemsWithSemanticRelevance(int page, int take, string text)
-    {
-        var url = $"{remoteServiceBaseUrl}items/withsemanticrelevance?text={HttpUtility.UrlEncode(text)}&pageIndex={page}&pageSize={take}";
-        var result = httpClient.GetFromJsonAsync<CatalogResult>(url);
-        return result!;
-    }
+    public Task<List<CatalogItem>> GetCatalogItems(IEnumerable<int> ids) =>
+        Task.FromResult(Parse<List<CatalogItem>>(Call("GetItemsByIds", Join(ids)))!);
 
-    public async Task<IEnumerable<CatalogBrand>> GetBrands()
-    {
-        var uri = $"{remoteServiceBaseUrl}catalogBrands";
-        var result = await httpClient.GetFromJsonAsync<CatalogBrand[]>(uri);
-        return result!;
-    }
+    public Task<CatalogResult> GetCatalogItemsWithSemanticRelevance(int page, int take, string text) =>
+        Task.FromResult(Parse<CatalogResult>(Call("Search", page, take, text ?? string.Empty))!);
 
-    public async Task<IEnumerable<CatalogItemType>> GetTypes()
-    {
-        var uri = $"{remoteServiceBaseUrl}catalogTypes";
-        var result = await httpClient.GetFromJsonAsync<CatalogItemType[]>(uri);
-        return result!;
-    }
+    public Task<IEnumerable<CatalogBrand>> GetBrands() =>
+        Task.FromResult<IEnumerable<CatalogBrand>>(Parse<List<CatalogBrand>>(Call("ListBrands"))!);
 
-    public async Task<CatalogFacets> GetCatalogFacets(int[]? brands, int[]? types)
+    public Task<IEnumerable<CatalogItemType>> GetTypes() =>
+        Task.FromResult<IEnumerable<CatalogItemType>>(Parse<List<CatalogItemType>>(Call("ListTypes"))!);
+
+    public Task<CatalogFacets> GetCatalogFacets(int[]? brands, int[]? types) =>
+        Task.FromResult(Parse<CatalogFacets>(Call("GetFacets", Join(types), Join(brands)))!);
+
+    private InvocationContext Facade()
     {
-        var filterQs = string.Empty;
-        if (types is { Length: > 0 })
+        if (_facade is not null)
         {
-            filterQs += string.Join("&", types.Select(t => $"type={t}")) + "&";
-        }
-        if (brands is { Length: > 0 })
-        {
-            filterQs += string.Join("&", brands.Select(b => $"brand={b}")) + "&";
+            return _facade;
         }
 
-        var uri = $"{remoteServiceBaseUrl}items/facets?{filterQs}".TrimEnd('&', '?');
-        var result = await httpClient.GetFromJsonAsync<CatalogFacets>(uri);
-        return result!;
+        lock (_gate)
+        {
+            _facade ??= RuntimeBridge.WebSocket(new WsConnectionData(_host))
+                .Netcore()
+                .GetType(FacadeType)
+                .Execute();
+        }
+
+        return _facade;
     }
 
-    private static string GetAllCatalogItemsUri(string baseUri, int pageIndex, int pageSize, int[]? brands, int[]? types)
+    private string Call(string method, params object[] args)
     {
-        string filterQs = string.Empty;
-
-        if (types is { Length: > 0 })
+        var value = Facade().InvokeStaticMethod(method, args).Execute().GetValue();
+        if (value is null)
         {
-            filterQs += string.Join("&", types.Select(t => $"type={t}")) + "&";
-        }
-        if (brands is { Length: > 0 })
-        {
-            filterQs += string.Join("&", brands.Select(b => $"brand={b}")) + "&";
+            return "null";
         }
 
-        return $"{baseUri}items?{filterQs}pageIndex={pageIndex}&pageSize={pageSize}";
+        return value as string ?? Convert.ToString(value) ?? "null";
     }
+
+    private static T? Parse<T>(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json) || json == "null")
+        {
+            return default;
+        }
+
+        return JsonSerializer.Deserialize<T>(json, JsonOptions);
+    }
+
+    private static string Join(IEnumerable<int>? ids) =>
+        ids is null ? string.Empty : string.Join(',', ids);
 }

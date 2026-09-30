@@ -44,6 +44,7 @@
 
   <ItemGroup>
     <Content Include="Pics\*.webp" CopyToOutputDirectory="PreserveNewest" />
+    <Content Update="Setup\catalog.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

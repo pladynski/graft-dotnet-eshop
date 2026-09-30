@@ -1,9 +1,9 @@
+// Graftcode catalog slice — HTTP maps stay as thin wrappers around CatalogGraft.
 using System.ComponentModel;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
-using Pgvector.EntityFrameworkCore;
 
 namespace eShop.Catalog.API;
 
@@ -82,14 +82,14 @@ public static class CatalogApi
             .WithTags("Brands");
         api.MapGet("/catalogtypes",
             [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
-            async (CatalogContext context) => await context.CatalogTypes.OrderBy(x => x.Type).ToListAsync())
+            async (CatalogContext context) => await CatalogGraft.ListTypesAsync(context))
             .WithName("ListItemTypes")
             .WithSummary("List catalog item types")
             .WithDescription("Get a list of the types of catalog items")
             .WithTags("Types");
         api.MapGet("/catalogbrands",
             [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
-            async (CatalogContext context) => await context.CatalogBrands.OrderBy(x => x.Brand).ToListAsync())
+            async (CatalogContext context) => await CatalogGraft.ListBrandsAsync(context))
             .WithName("ListItemBrands")
             .WithSummary("List catalog item brands")
             .WithDescription("Get a list of the brands of catalog items")
@@ -134,35 +134,14 @@ public static class CatalogApi
         [Description("The types of items to return. Repeat the parameter to filter by multiple types.")] int[]? type,
         [Description("The brands of items to return. Repeat the parameter to filter by multiple brands.")] int[]? brand)
     {
-        var pageSize = paginationRequest.PageSize;
-        var pageIndex = paginationRequest.PageIndex;
-
-        var root = (IQueryable<CatalogItem>)services.Context.CatalogItems;
-
-        if (name is not null)
-        {
-            root = root.Where(c => c.Name.StartsWith(name));
-        }
-        if (type is { Length: > 0 })
-        {
-            root = root.Where(c => type.Contains(c.CatalogTypeId));
-        }
-        if (brand is { Length: > 0 })
-        {
-            root = root.Where(c => brand.Contains(c.CatalogBrandId));
-        }
-
-        var totalItems = await root
-            .LongCountAsync();
-
-        var itemsOnPage = await root
-            .Include(ci => ci.CatalogBrand)
-            .OrderBy(c => c.Name)
-            .Skip(pageSize * pageIndex)
-            .Take(pageSize)
-            .ToListAsync();
-
-        return TypedResults.Ok(new PaginatedItems<CatalogItem>(pageIndex, pageSize, totalItems, itemsOnPage));
+        var page = await CatalogGraft.ListItemsAsync(
+            services,
+            paginationRequest.PageIndex,
+            paginationRequest.PageSize,
+            name,
+            type,
+            brand);
+        return TypedResults.Ok(page);
     }
 
     public static async Task<Ok<CatalogFacets>> GetCatalogFacets(
@@ -170,37 +149,7 @@ public static class CatalogApi
         [Description("The types the counts should be evaluated within. Repeat the parameter to include multiple types.")] int[]? type,
         [Description("The brands the counts should be evaluated within. Repeat the parameter to include multiple brands.")] int[]? brand)
     {
-        var items = (IQueryable<CatalogItem>)services.Context.CatalogItems;
-
-        // Brand counts are evaluated against the active type filter, and type counts against
-        // the active brand filter. This mirrors the catalog's additive-within-facet,
-        // intersect-across-facet selection semantics so each badge previews the result of
-        // adding that option to the current selection.
-        var brandScope = items;
-        if (type is { Length: > 0 })
-        {
-            brandScope = brandScope.Where(c => type.Contains(c.CatalogTypeId));
-        }
-        var brandCounts = await brandScope
-            .GroupBy(c => c.CatalogBrandId)
-            .Select(g => new CatalogFacetCount(g.Key, g.Count()))
-            .ToListAsync();
-
-        var typeScope = items;
-        if (brand is { Length: > 0 })
-        {
-            typeScope = typeScope.Where(c => brand.Contains(c.CatalogBrandId));
-        }
-        var typeCounts = await typeScope
-            .GroupBy(c => c.CatalogTypeId)
-            .Select(g => new CatalogFacetCount(g.Key, g.Count()))
-            .ToListAsync();
-
-        return TypedResults.Ok(new CatalogFacets(
-            brandCounts,
-            typeCounts,
-            brandCounts.Sum(b => b.Count),
-            typeCounts.Sum(t => t.Count)));
+        return TypedResults.Ok(await CatalogGraft.GetFacetsAsync(services, type, brand));
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -208,8 +157,7 @@ public static class CatalogApi
         [AsParameters] CatalogServices services,
         [Description("List of ids for catalog items to return")] int[] ids)
     {
-        var items = await services.Context.CatalogItems.Where(item => ids.Contains(item.Id)).ToListAsync();
-        return TypedResults.Ok(items);
+        return TypedResults.Ok(await CatalogGraft.FindItemsByIdsAsync(services, ids));
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -225,14 +173,8 @@ public static class CatalogApi
             });
         }
 
-        var item = await services.Context.CatalogItems.Include(ci => ci.CatalogBrand).SingleOrDefaultAsync(ci => ci.Id == id);
-
-        if (item == null)
-        {
-            return TypedResults.NotFound();
-        }
-
-        return TypedResults.Ok(item);
+        var item = await CatalogGraft.FindItemAsync(services, id);
+        return item is null ? TypedResults.NotFound() : TypedResults.Ok(item);
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -252,20 +194,13 @@ public static class CatalogApi
         IWebHostEnvironment environment,
         [Description("The catalog item id")] int id)
     {
-        var item = await context.CatalogItems.FindAsync(id);
-
-        if (item is null || item.PictureFileName is null)
+        var picture = await CatalogGraft.TryGetPictureAsync(context, environment.ContentRootPath, id);
+        if (picture is null)
         {
             return TypedResults.NotFound();
         }
 
-        var path = GetFullPath(environment.ContentRootPath, item.PictureFileName);
-
-        string imageFileExtension = Path.GetExtension(item.PictureFileName) ?? string.Empty;
-        string mimetype = GetImageMimeTypeFromImageFileExtension(imageFileExtension);
-        DateTime lastModified = File.GetLastWriteTimeUtc(path);
-
-        return TypedResults.PhysicalFile(path, mimetype, lastModified: lastModified);
+        return TypedResults.PhysicalFile(picture.Value.Path, picture.Value.Mime, lastModified: picture.Value.LastModified);
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -284,53 +219,12 @@ public static class CatalogApi
         [AsParameters] CatalogServices services,
         [Description("The text string to use when search for related items in the catalog"), Required, MinLength(1)] string text)
     {
-        var pageSize = paginationRequest.PageSize;
-        var pageIndex = paginationRequest.PageIndex;
-
-        if (!services.CatalogAI.IsEnabled)
-        {
-            return await GetItemsByName(paginationRequest, services, text);
-        }
-
-        // Create an embedding for the input search
-        var vector = await services.CatalogAI.GetEmbeddingAsync(text);
-
-        if (vector is null)
-        {
-            return await GetItemsByName(paginationRequest, services, text);
-        }
-
-        // Get the total number of items
-        var totalItems = await services.Context.CatalogItems
-            .LongCountAsync();
-
-        // Get the next page of items, ordered by most similar (smallest distance) to the input search
-        List<CatalogItem> itemsOnPage;
-        if (services.Logger.IsEnabled(LogLevel.Debug))
-        {
-            var itemsWithDistance = await services.Context.CatalogItems
-                .Where(c => c.Embedding != null)
-                .Select(c => new { Item = c, Distance = c.Embedding!.CosineDistance(vector) })
-                .OrderBy(c => c.Distance)
-                .Skip(pageSize * pageIndex)
-                .Take(pageSize)
-                .ToListAsync();
-
-            services.Logger.LogDebug("Results from {text}: {results}", text, string.Join(", ", itemsWithDistance.Select(i => $"{i.Item.Name} => {i.Distance}")));
-
-            itemsOnPage = itemsWithDistance.Select(i => i.Item).ToList();
-        }
-        else
-        {
-            itemsOnPage = await services.Context.CatalogItems
-                .Where(c => c.Embedding != null)
-                .OrderBy(c => c.Embedding!.CosineDistance(vector))
-                .Skip(pageSize * pageIndex)
-                .Take(pageSize)
-                .ToListAsync();
-        }
-
-        return TypedResults.Ok(new PaginatedItems<CatalogItem>(pageIndex, pageSize, totalItems, itemsOnPage));
+        var page = await CatalogGraft.SearchAsync(
+            services,
+            paginationRequest.PageIndex,
+            paginationRequest.PageSize,
+            text);
+        return TypedResults.Ok(page);
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -372,39 +266,13 @@ public static class CatalogApi
         [AsParameters] CatalogServices services,
         CatalogItem productToUpdate)
     {
-        var catalogItem = await services.Context.CatalogItems.SingleOrDefaultAsync(i => i.Id == id);
-
-        if (catalogItem == null)
+        var result = await CatalogGraft.UpdateItemAsync(services, id, productToUpdate);
+        return result.StatusCode switch
         {
-            return TypedResults.NotFound<ProblemDetails>(new (){
-                Detail = $"Item with id {id} not found."
-            });
-        }
-
-        // Update current product
-        var catalogEntry = services.Context.Entry(catalogItem);
-        catalogEntry.CurrentValues.SetValues(productToUpdate);
-
-        catalogItem.Embedding = await services.CatalogAI.GetEmbeddingAsync(catalogItem);
-
-        var priceEntry = catalogEntry.Property(i => i.Price);
-
-        if (priceEntry.IsModified) // Save product's data and publish integration event through the Event Bus if price has changed
-        {
-            //Create Integration Event to be published through the Event Bus
-            var priceChangedEvent = new ProductPriceChangedIntegrationEvent(catalogItem.Id, productToUpdate.Price, priceEntry.OriginalValue);
-
-            // Achieving atomicity between original Catalog database operation and the IntegrationEventLog thanks to a local transaction
-            await services.EventService.SaveEventAndCatalogContextChangesAsync(priceChangedEvent);
-
-            // Publish through the Event Bus and mark the saved event as published
-            await services.EventService.PublishThroughEventBusAsync(priceChangedEvent);
-        }
-        else // Just save the updated product because the Product's Price hasn't changed.
-        {
-            await services.Context.SaveChangesAsync();
-        }
-        return TypedResults.Created($"/api/catalog/items/{id}");
+            StatusCodes.Status400BadRequest => TypedResults.BadRequest<ProblemDetails>(new() { Detail = result.Detail }),
+            StatusCodes.Status404NotFound => TypedResults.NotFound<ProblemDetails>(new() { Detail = result.Detail }),
+            _ => TypedResults.Created($"/api/catalog/items/{id}")
+        };
     }
 
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status400BadRequest, "application/problem+json")]
@@ -412,56 +280,18 @@ public static class CatalogApi
         [AsParameters] CatalogServices services,
         CatalogItem product)
     {
-        var item = new CatalogItem(product.Name)
-        {
-            Id = product.Id,
-            CatalogBrandId = product.CatalogBrandId,
-            CatalogTypeId = product.CatalogTypeId,
-            Description = product.Description,
-            PictureFileName = product.PictureFileName,
-            Price = product.Price,
-            AvailableStock = product.AvailableStock,
-            RestockThreshold = product.RestockThreshold,
-            MaxStockThreshold = product.MaxStockThreshold
-        };
-        item.Embedding = await services.CatalogAI.GetEmbeddingAsync(item);
-
-        services.Context.CatalogItems.Add(item);
-        await services.Context.SaveChangesAsync();
-
-        return TypedResults.Created($"/api/catalog/items/{item.Id}");
+        var id = await CatalogGraft.CreateItemAsync(services, product);
+        return TypedResults.Created($"/api/catalog/items/{id}");
     }
 
     public static async Task<Results<NoContent, NotFound>> DeleteItemById(
         [AsParameters] CatalogServices services,
         [Description("The id of the catalog item to delete")] int id)
     {
-        var item = services.Context.CatalogItems.SingleOrDefault(x => x.Id == id);
-
-        if (item is null)
-        {
-            return TypedResults.NotFound();
-        }
-
-        services.Context.CatalogItems.Remove(item);
-        await services.Context.SaveChangesAsync();
-        return TypedResults.NoContent();
+        var deleted = await CatalogGraft.DeleteItemAsync(services, id);
+        return deleted ? TypedResults.NoContent() : TypedResults.NotFound();
     }
 
-    private static string GetImageMimeTypeFromImageFileExtension(string extension) => extension switch
-    {
-        ".png" => "image/png",
-        ".gif" => "image/gif",
-        ".jpg" or ".jpeg" => "image/jpeg",
-        ".bmp" => "image/bmp",
-        ".tiff" => "image/tiff",
-        ".wmf" => "image/wmf",
-        ".jp2" => "image/jp2",
-        ".svg" => "image/svg+xml",
-        ".webp" => "image/webp",
-        _ => "application/octet-stream",
-    };
-
     public static string GetFullPath(string contentRootPath, string pictureFileName) =>
-        Path.Combine(contentRootPath, "Pics", pictureFileName);
+        CatalogGraft.GetFullPath(contentRootPath, pictureFileName);
 }

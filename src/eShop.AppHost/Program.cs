@@ -1,4 +1,5 @@
-﻿using eShop.AppHost;
+﻿// Graftcode catalog slice — webapp catalog reads use Gateway, not catalog-api HTTP.
+using eShop.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -75,7 +76,8 @@ var webApp = builder.AddProject<Projects.WebApp>("webapp", launchProfileName)
     .WithReference(orderingApi)
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WaitFor(identityApi)
-    .WithEnvironment("IdentityUrl", identityEndpoint);
+    .WithEnvironment("IdentityUrl", identityEndpoint)
+    .WithEnvironment("CATALOG_GRAFT_HOST", "ws://localhost:8000/ws");
 
 // Set UseFoundry=true to provision Microsoft Foundry for chat and embeddings.
 bool useFoundry = Extensions.IsFoundryEnabled(builder.Configuration);

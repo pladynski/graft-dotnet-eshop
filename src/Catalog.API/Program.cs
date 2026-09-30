@@ -1,4 +1,5 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+﻿// Graftcode catalog slice — HTTP host kept; storefront reads CatalogGraft via Gateway.
+var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddApplicationServices();
@@ -18,6 +19,8 @@ app.MapDefaultEndpoints();
 
 app.UseStatusCodePages();
 
+// Legacy HTTP routes stay for functional tests, the picture proxy, and the rest of Aspire.
+// The storefront catalog client calls CatalogGraft through Graftcode Gateway instead.
 app.MapCatalogApi();
 
 app.UseDefaultOpenApi();

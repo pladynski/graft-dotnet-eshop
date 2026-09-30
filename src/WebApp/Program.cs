@@ -1,4 +1,5 @@
-﻿using eShop.WebApp.Components;
+﻿// Graftcode catalog slice — images still come from the catalog HTTP picture route.
+using eShop.WebApp.Components;
 using eShop.ServiceDefaults;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -29,6 +30,7 @@ app.UseStaticFiles();
 
 app.MapRazorComponents<App>().AddInteractiveServerRenderMode();
 
+// Catalog JSON is served by CatalogGraft. Pictures stay on this legacy HTTP route.
 app.MapForwarder("/product-images/{id}", "https+http://catalog-api", "/api/catalog/items/{id}/pic");
 
 app.Run();
