@@ -1,16 +1,14 @@
 ﻿// Graftcode basket slice — same BasketService, calls the generated Basket graft.
-using System.Text.Json;
 using graft.nuget.Basket.API;
 using Microsoft.AspNetCore.Components.Authorization;
 using BasketApi = graft.nuget.eShop.Basket.API.BasketService;
+using BasketResult = graft.nuget.eShop.Basket.API.BasketResult;
 
 namespace eShop.WebApp.Services;
 
 public class BasketService(AuthenticationStateProvider authenticationStateProvider)
 {
     public const string DefaultHost = "ws://localhost:8000/ws";
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     static BasketService() => Configure();
 
@@ -29,8 +27,8 @@ public class BasketService(AuthenticationStateProvider authenticationStateProvid
 
     public async Task<IReadOnlyCollection<BasketQuantity>> GetBasketAsync()
     {
-        var lines = JsonSerializer.Deserialize<List<BasketLine>>(BasketApi.GetBasket(await BuyerIdAsync()), JsonOptions) ?? [];
-        return lines.Select(line => new BasketQuantity(line.ProductId, line.Quantity)).ToList();
+        var result = BasketApi.GetBasket(await BuyerIdAsync());
+        return Lines(result);
     }
 
     public async Task DeleteBasketAsync()
@@ -40,21 +38,40 @@ public class BasketService(AuthenticationStateProvider authenticationStateProvid
 
     public async Task UpdateBasketAsync(IReadOnlyCollection<BasketQuantity> basket)
     {
-        var payload = JsonSerializer.Serialize(
-            basket.Select(item => new BasketLine(item.ProductId, item.Quantity)),
-            JsonOptions);
-        ThrowIfUnauthenticated(BasketApi.UpdateBasket(await BuyerIdAsync(), payload));
+        var lines = basket ?? [];
+        ThrowIfUnauthenticated(BasketApi.UpdateBasket(
+            await BuyerIdAsync(),
+            lines.Select(item => item.ProductId).ToArray(),
+            lines.Select(item => item.Quantity).ToArray()));
     }
 
-    private static void ThrowIfUnauthenticated(string json)
+    private static IReadOnlyCollection<BasketQuantity> Lines(BasketResult result)
     {
-        if (string.IsNullOrWhiteSpace(json) || json[0] != '{')
+        if (result is null || result.Count <= 0)
         {
-            return;
+            return [];
         }
 
-        var status = JsonSerializer.Deserialize<StatusPayload>(json, JsonOptions);
-        if (string.Equals(status?.Status, "unauthenticated", StringComparison.Ordinal))
+        var ids = result.ProductIds;
+        var quantities = result.Quantities;
+        if (ids is null || quantities is null)
+        {
+            return [];
+        }
+
+        var count = Math.Min(result.Count, Math.Min(ids.Length, quantities.Length));
+        var lines = new List<BasketQuantity>(count);
+        for (var i = 0; i < count; i++)
+        {
+            lines.Add(new BasketQuantity(ids[i], quantities[i]));
+        }
+
+        return lines;
+    }
+
+    private static void ThrowIfUnauthenticated(BasketResult result)
+    {
+        if (string.Equals(result?.Status, "unauthenticated", StringComparison.Ordinal))
         {
             throw new UnauthorizedAccessException("You must be logged in.");
         }
@@ -101,10 +118,6 @@ public class BasketService(AuthenticationStateProvider authenticationStateProvid
         }
         """;
     }
-
-    private sealed record BasketLine(int ProductId, int Quantity);
-
-    private sealed record StatusPayload(string Status);
 }
 
 public record BasketQuantity(int ProductId, int Quantity);

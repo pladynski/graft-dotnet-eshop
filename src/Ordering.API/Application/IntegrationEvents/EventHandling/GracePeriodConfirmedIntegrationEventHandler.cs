@@ -14,15 +14,16 @@ public class GracePeriodConfirmedIntegrationEventHandler : IIntegrationEventHand
         this.logger = logger;
     }
 
-    public static string OnGracePeriodConfirmed(int orderId) =>
+    public static GraftStatus OnGracePeriodConfirmed(int orderId) =>
         GraftHost.Block(async provider =>
         {
             await Apply(provider, orderId).ConfigureAwait(false);
-            return GraftHost.Ok();
+            return new GraftStatus("ok");
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        Create(provider).Handle(new GracePeriodConfirmedIntegrationEvent(orderId));
+        ((IIntegrationEventHandler<GracePeriodConfirmedIntegrationEvent>)Create(provider))
+            .Handle(new GracePeriodConfirmedIntegrationEvent(orderId));
 
     /// <summary>
     /// Event handler which confirms that the grace period
@@ -32,7 +33,7 @@ public class GracePeriodConfirmedIntegrationEventHandler : IIntegrationEventHand
     /// <param name="event">       
     /// </param>
     /// <returns></returns>
-    public async Task Handle(GracePeriodConfirmedIntegrationEvent @event)
+    async Task IIntegrationEventHandler<GracePeriodConfirmedIntegrationEvent>.Handle(GracePeriodConfirmedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

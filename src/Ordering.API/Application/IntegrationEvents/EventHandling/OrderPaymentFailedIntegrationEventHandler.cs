@@ -13,17 +13,18 @@ public class OrderPaymentFailedIntegrationEventHandler : IIntegrationEventHandle
         this.logger = logger;
     }
 
-    public static string OnPaymentFailed(int orderId) =>
+    public static GraftStatus OnPaymentFailed(int orderId) =>
         GraftHost.Block(async provider =>
         {
             await Apply(provider, orderId).ConfigureAwait(false);
-            return GraftHost.Ok();
+            return new GraftStatus("ok");
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        Create(provider).Handle(new OrderPaymentFailedIntegrationEvent(orderId));
+        ((IIntegrationEventHandler<OrderPaymentFailedIntegrationEvent>)Create(provider))
+            .Handle(new OrderPaymentFailedIntegrationEvent(orderId));
 
-    public async Task Handle(OrderPaymentFailedIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderPaymentFailedIntegrationEvent>.Handle(OrderPaymentFailedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

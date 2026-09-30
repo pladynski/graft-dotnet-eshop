@@ -16,15 +16,15 @@ public class OrderStatusChangedToShippedIntegrationEventHandler : IIntegrationEv
         this.logger = logger;
     }
 
-    public static string OnOrderShipped(int orderId, string orderStatus, string buyerName) =>
+    public static GraftStatus OnOrderShipped(int orderId, string orderStatus, string buyerName) =>
         GraftHost.Block(async provider =>
         {
-            var handler = Create(provider);
+            var handler = (IIntegrationEventHandler<OrderStatusChangedToShippedIntegrationEvent>)Create(provider);
             await handler.Handle(new OrderStatusChangedToShippedIntegrationEvent(orderId, orderStatus ?? string.Empty, buyerName ?? string.Empty)).ConfigureAwait(false);
-            return GraftHost.Ok();
+            return new GraftStatus("ok");
         });
 
-    public async Task Handle(OrderStatusChangedToShippedIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderStatusChangedToShippedIntegrationEvent>.Handle(OrderStatusChangedToShippedIntegrationEvent @event)
     {
         var subscriptions = await retriever.GetSubscriptionsOfType(WebhookType.OrderShipped);
 

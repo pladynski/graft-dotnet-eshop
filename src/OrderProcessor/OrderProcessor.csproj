@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Npgsql" />
-    <PackageReference Include="graft.nuget.ordering.api_kmowfv" />
+    <PackageReference Include="graft.nuget.ordering.api_aro1yz" />
   </ItemGroup>
 
   <ItemGroup>

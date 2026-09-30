@@ -7,7 +7,7 @@ namespace eShop.Catalog.API;
 
 /// <summary>
 /// Catalog operations hosted by Graftcode Gateway.
-/// Public methods return JSON strings or a primitive, except the stock decision, which is a record.
+/// Storefront reads still return JSON strings. Stock and paid orders use records.
 /// There is no REST route table.
 /// </summary>
 public static class CatalogApi
@@ -103,12 +103,12 @@ public static class CatalogApi
             return await handler.DecideAsync(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockLines(stockItems))).ConfigureAwait(false);
         });
 
-    public static string OnOrderPaid(int orderId, string stockItemsJson) =>
+    public static GraftStatus OnOrderPaid(int orderId, StockRequest stockItems) =>
         Block(async (provider, _) =>
         {
             var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToPaidIntegrationEventHandler>(provider);
-            await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, ReadStockItems(stockItemsJson))).ConfigureAwait(false);
-            return "{\"status\":\"ok\"}";
+            await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, ReadStockLines(stockItems))).ConfigureAwait(false);
+            return new GraftStatus("ok");
         });
 
     private static List<OrderStockItem> ReadStockLines(StockRequest stockItems)
@@ -123,16 +123,6 @@ public static class CatalogApi
         }
 
         return items;
-    }
-
-    private static List<OrderStockItem> ReadStockItems(string stockItemsJson)
-    {
-        if (string.IsNullOrWhiteSpace(stockItemsJson))
-        {
-            return [];
-        }
-
-        return JsonSerializer.Deserialize<List<OrderStockItem>>(stockItemsJson, JsonOptions) ?? [];
     }
 
     internal static async Task<PaginatedItems<CatalogItem>> ListItemsAsync(
@@ -526,3 +516,5 @@ public static class CatalogApi
 public sealed record StockRequest(int[] ProductIds, int[] Units);
 
 public sealed record StockDecision(string Result, int[] ProductIds);
+
+public sealed record GraftStatus(string Status);

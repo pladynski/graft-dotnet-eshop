@@ -1,5 +1,4 @@
 // Generated webhooks graft. Swap ESHOP_GRAFT_PLUGIN_NAME to move this call to another broker plugin.
-using System.Globalization;
 using eShop.Graft;
 using WebhookGraft = graft.nuget.Webhooks.API.IntegrationEvents.ProductPriceChangedIntegrationEventHandler;
 
@@ -18,10 +17,7 @@ internal static class PriceChangedGraft
         }
 
         Ensure();
-        WebhookGraft.OnProductPriceChanged(
-            price.ProductId,
-            price.NewPrice.ToString(CultureInfo.InvariantCulture),
-            price.OldPrice.ToString(CultureInfo.InvariantCulture));
+        WebhookGraft.OnProductPriceChanged(price.ProductId, (double)price.NewPrice, (double)price.OldPrice);
     }
 
     private static void Ensure()

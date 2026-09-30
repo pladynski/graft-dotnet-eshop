@@ -13,17 +13,18 @@ public class OrderStockConfirmedIntegrationEventHandler : IIntegrationEventHandl
         this.logger = logger;
     }
 
-    public static string OnStockConfirmed(int orderId) =>
+    public static GraftStatus OnStockConfirmed(int orderId) =>
         GraftHost.Block(async provider =>
         {
             await Apply(provider, orderId).ConfigureAwait(false);
-            return GraftHost.Ok();
+            return new GraftStatus("ok");
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        Create(provider).Handle(new OrderStockConfirmedIntegrationEvent(orderId));
+        ((IIntegrationEventHandler<OrderStockConfirmedIntegrationEvent>)Create(provider))
+            .Handle(new OrderStockConfirmedIntegrationEvent(orderId));
 
-    public async Task Handle(OrderStockConfirmedIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderStockConfirmedIntegrationEvent>.Handle(OrderStockConfirmedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

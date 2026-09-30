@@ -5,34 +5,13 @@ internal static class GraftHost
 {
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
 
-    internal static string Block(Func<IServiceProvider, Task<string>> action) =>
+    internal static T Block<T>(Func<IServiceProvider, Task<T>> action) =>
         Task.Run(async () =>
         {
             var host = await HostTask.Value.ConfigureAwait(false);
             await using var scope = host.Services.CreateAsyncScope();
             return await action(scope.ServiceProvider).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
-
-    internal static string Ok() => "{\"status\":\"ok\"}";
-
-    internal static List<int> ParseIds(string productIds)
-    {
-        var ids = new List<int>();
-        if (string.IsNullOrWhiteSpace(productIds))
-        {
-            return ids;
-        }
-
-        foreach (var part in productIds.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (int.TryParse(part, out var id))
-            {
-                ids.Add(id);
-            }
-        }
-
-        return ids;
-    }
 
     private static async Task<IHost> StartHostAsync()
     {
@@ -87,3 +66,5 @@ internal static class GraftHost
         return baseDir;
     }
 }
+
+public sealed record GraftStatus(string Status);

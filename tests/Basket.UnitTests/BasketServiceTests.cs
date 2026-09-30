@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using eShop.Basket.API;
+﻿using eShop.Basket.API;
 using eShop.Basket.API.IntegrationEvents.EventHandling;
 using eShop.Basket.API.IntegrationEvents.EventHandling.Events;
 using eShop.Basket.API.Model;
@@ -13,16 +12,15 @@ namespace eShop.Basket.UnitTests;
 [TestClass]
 public class BasketServiceTests
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
     public TestContext TestContext { get; set; } = null!;
 
     [TestMethod]
     public void GetBasketReturnsEmptyForNoUser()
     {
-        var json = Call(Substitute.For<IBasketRepository>(), serviceBuyer => BasketService.GetBasket(""));
+        var result = Call(Substitute.For<IBasketRepository>(), _ => BasketService.GetBasket(""));
 
-        Assert.AreEqual("[]", json);
+        Assert.AreEqual(0, result.Count);
+        Assert.AreEqual("ok", result.Status);
     }
 
     [TestMethod]
@@ -35,11 +33,11 @@ public class BasketServiceTests
             Items = [new BasketItem { Id = "some-id", ProductId = 7, Quantity = 2 }]
         }));
 
-        var lines = Lines(Call(repository, _ => BasketService.GetBasket("1")));
+        var result = Call(repository, _ => BasketService.GetBasket("1"));
 
-        Assert.HasCount(1, lines);
-        Assert.AreEqual(7, lines[0].ProductId);
-        Assert.AreEqual(2, lines[0].Quantity);
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual(7, result.ProductIds[0]);
+        Assert.AreEqual(2, result.Quantities[0]);
     }
 
     [TestMethod]
@@ -52,7 +50,10 @@ public class BasketServiceTests
             Items = [new BasketItem { Id = "some-id", ProductId = 7, Quantity = 2 }]
         }));
 
-        Assert.AreEqual("[]", Call(repository, _ => BasketService.GetBasket("")));
+        var result = Call(repository, _ => BasketService.GetBasket(""));
+
+        Assert.AreEqual(0, result.Count);
+        Assert.AreEqual("ok", result.Status);
     }
 
     [TestMethod]
@@ -62,11 +63,11 @@ public class BasketServiceTests
         repository.UpdateBasketAsync(Arg.Any<CustomerBasket>())
             .Returns(call => call.Arg<CustomerBasket>());
 
-        var lines = Lines(Call(repository, _ => BasketService.UpdateBasket("buyer-1", """[{"productId":42,"quantity":3}]""")));
+        var result = Call(repository, _ => BasketService.UpdateBasket("buyer-1", [42], [3]));
 
-        Assert.HasCount(1, lines);
-        Assert.AreEqual(42, lines[0].ProductId);
-        Assert.AreEqual(3, lines[0].Quantity);
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual(42, result.ProductIds[0]);
+        Assert.AreEqual(3, result.Quantities[0]);
         await repository.Received(1).UpdateBasketAsync(Arg.Is<CustomerBasket>(basket =>
             basket.BuyerId == "buyer-1" &&
             basket.Items.Count == 1 &&
@@ -79,9 +80,9 @@ public class BasketServiceTests
     {
         var repository = Substitute.For<IBasketRepository>();
 
-        using var document = JsonDocument.Parse(Call(repository, _ => BasketService.UpdateBasket("", "[]")));
+        var result = Call(repository, _ => BasketService.UpdateBasket("", [], []));
 
-        Assert.AreEqual("unauthenticated", document.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("unauthenticated", result.Status);
         await repository.DidNotReceive().UpdateBasketAsync(Arg.Any<CustomerBasket>());
     }
 
@@ -92,9 +93,9 @@ public class BasketServiceTests
         repository.UpdateBasketAsync(Arg.Any<CustomerBasket>())
             .Returns(Task.FromResult<CustomerBasket>(null!));
 
-        using var document = JsonDocument.Parse(Call(repository, _ => BasketService.UpdateBasket("missing", "[]")));
+        var result = Call(repository, _ => BasketService.UpdateBasket("missing", [], []));
 
-        Assert.AreEqual("notFound", document.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("notFound", result.Status);
     }
 
     [TestMethod]
@@ -102,9 +103,9 @@ public class BasketServiceTests
     {
         var repository = Substitute.For<IBasketRepository>();
 
-        using var document = JsonDocument.Parse(Call(repository, _ => BasketService.DeleteBasket("buyer-1")));
+        var result = Call(repository, _ => BasketService.DeleteBasket("buyer-1"));
 
-        Assert.AreEqual("deleted", document.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("deleted", result.Status);
         await repository.Received(1).DeleteBasketAsync("buyer-1");
     }
 
@@ -113,9 +114,9 @@ public class BasketServiceTests
     {
         var repository = Substitute.For<IBasketRepository>();
 
-        using var document = JsonDocument.Parse(Call(repository, _ => BasketService.OnOrderStarted("buyer-1")));
+        var result = Call(repository, _ => BasketService.OnOrderStarted("buyer-1"));
 
-        Assert.AreEqual("deleted", document.RootElement.GetProperty("status").GetString());
+        Assert.AreEqual("deleted", result.Status);
         await repository.Received(1).DeleteBasketAsync("buyer-1");
     }
 
@@ -132,7 +133,7 @@ public class BasketServiceTests
         await repository.Received(1).DeleteBasketAsync("buyer-1");
     }
 
-    private static string Call(IBasketRepository repository, Func<IServiceProvider, string> action)
+    private static BasketResult Call(IBasketRepository repository, Func<IServiceProvider, BasketResult> action)
     {
         var services = new ServiceCollection();
         services.AddSingleton(repository);
@@ -142,9 +143,4 @@ public class BasketServiceTests
         using var _ = BasketService.Attach(provider);
         return action(provider);
     }
-
-    private static List<BasketLine> Lines(string json) =>
-        JsonSerializer.Deserialize<List<BasketLine>>(json, Json) ?? [];
-
-    private sealed record BasketLine(int ProductId, int Quantity);
 }

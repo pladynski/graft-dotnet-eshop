@@ -13,20 +13,21 @@ public class OrderStockRejectedIntegrationEventHandler : IIntegrationEventHandle
         this.logger = logger;
     }
 
-    public static string OnStockRejected(int orderId, string productIds) =>
+    public static GraftStatus OnStockRejected(int orderId, int[] productIds) =>
         GraftHost.Block(async provider =>
         {
-            await Apply(provider, orderId, GraftHost.ParseIds(productIds)).ConfigureAwait(false);
-            return GraftHost.Ok();
+            await Apply(provider, orderId, productIds ?? []).ConfigureAwait(false);
+            return new GraftStatus("ok");
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId, IEnumerable<int> productIds)
     {
         var items = productIds.Select(id => new ConfirmedOrderStockItem(id, false)).ToList();
-        return Create(provider).Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
+        return ((IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>)Create(provider))
+            .Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
     }
 
-    public async Task Handle(OrderStockRejectedIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>.Handle(OrderStockRejectedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

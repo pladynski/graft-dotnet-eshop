@@ -5,25 +5,13 @@ internal static class GraftHost
 {
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
 
-    internal static string Block(Func<IServiceProvider, Task<string>> action) =>
+    internal static T Block<T>(Func<IServiceProvider, Task<T>> action) =>
         Task.Run(async () =>
         {
             var host = await HostTask.Value.ConfigureAwait(false);
             await using var scope = host.Services.CreateAsyncScope();
             return await action(scope.ServiceProvider).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
-
-    internal static string Ok() => "{\"status\":\"ok\"}";
-
-    internal static List<OrderStockItem> ReadStock(string stockItemsJson)
-    {
-        if (string.IsNullOrWhiteSpace(stockItemsJson))
-        {
-            return [];
-        }
-
-        return JsonSerializer.Deserialize<List<OrderStockItem>>(stockItemsJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
-    }
 
     private static async Task<IHost> StartHostAsync()
     {
@@ -78,3 +66,7 @@ internal static class GraftHost
         return baseDir;
     }
 }
+
+public sealed record StockRequest(int[] ProductIds, int[] Units);
+
+public sealed record GraftStatus(string Status);

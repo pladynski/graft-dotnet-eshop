@@ -1,5 +1,4 @@
-﻿using System.Text.Json;
-using eShop.Graft;
+﻿using eShop.Graft;
 using StockDecision = graft.nuget.eShop.Catalog.API.StockDecision;
 
 namespace eShop.Ordering.API.Application.IntegrationEvents;
@@ -10,7 +9,6 @@ public class OrderingIntegrationEventService(
     ILogger<OrderingIntegrationEventService> logger,
     IServiceScopeFactory scopeFactory) : IOrderingIntegrationEventService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly OrderingContext _orderingContext = orderingContext ?? throw new ArgumentNullException(nameof(orderingContext));
     private readonly IIntegrationEventLogService _eventLogService = integrationEventLogService ?? throw new ArgumentNullException(nameof(integrationEventLogService));
     private readonly ILogger<OrderingIntegrationEventService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -71,9 +69,8 @@ public class OrderingIntegrationEventService(
                 await ApplyPaymentOutcomeAsync(confirmed.OrderId, outcome);
                 break;
             case OrderStatusChangedToPaidIntegrationEvent paid:
-                var stockJson = StockJson(paid.OrderStockItems);
-                GraftCalls.OrderPaid(paid.OrderId, stockJson);
-                GraftCalls.OrderPaidWebhook(paid.OrderId, stockJson);
+                GraftCalls.OrderPaid(paid.OrderId, paid.OrderStockItems);
+                GraftCalls.OrderPaidWebhook(paid.OrderId, paid.OrderStockItems);
                 break;
             case OrderStatusChangedToShippedIntegrationEvent shipped:
                 GraftCalls.OrderShipped(shipped.OrderId, shipped.OrderStatus.ToString(), shipped.BuyerName);
@@ -129,9 +126,4 @@ public class OrderingIntegrationEventService(
 
         throw new InvalidOperationException($"Payment graft returned '{outcome}' for order {orderId}.");
     }
-
-    private static string StockJson(IEnumerable<OrderStockItem> items) =>
-        JsonSerializer.Serialize(
-            (items ?? []).Select(item => new { productId = item.ProductId, units = item.Units }),
-            JsonOptions);
 }

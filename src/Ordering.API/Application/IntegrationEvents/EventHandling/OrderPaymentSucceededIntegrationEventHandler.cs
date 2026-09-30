@@ -13,17 +13,18 @@ public class OrderPaymentSucceededIntegrationEventHandler : IIntegrationEventHan
         this.logger = logger;
     }
 
-    public static string OnPaymentSucceeded(int orderId) =>
+    public static GraftStatus OnPaymentSucceeded(int orderId) =>
         GraftHost.Block(async provider =>
         {
             await Apply(provider, orderId).ConfigureAwait(false);
-            return GraftHost.Ok();
+            return new GraftStatus("ok");
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        Create(provider).Handle(new OrderPaymentSucceededIntegrationEvent(orderId));
+        ((IIntegrationEventHandler<OrderPaymentSucceededIntegrationEvent>)Create(provider))
+            .Handle(new OrderPaymentSucceededIntegrationEvent(orderId));
 
-    public async Task Handle(OrderPaymentSucceededIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderPaymentSucceededIntegrationEvent>.Handle(OrderPaymentSucceededIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

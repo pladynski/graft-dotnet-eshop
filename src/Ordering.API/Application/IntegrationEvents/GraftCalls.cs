@@ -7,6 +7,7 @@ using StockRequest = graft.nuget.eShop.Catalog.API.StockRequest;
 using PaymentGraft = graft.nuget.eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler;
 using PaidWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToPaidIntegrationEventHandler;
 using ShippedWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToShippedIntegrationEventHandler;
+using WebhookStock = graft.nuget.Webhooks.API.IntegrationEvents.StockRequest;
 
 namespace eShop.Ordering.API.Application.IntegrationEvents;
 
@@ -37,16 +38,22 @@ internal static class GraftCalls
         return PaymentGraft.OnStockConfirmed(orderId);
     }
 
-    public static void OrderPaid(int orderId, string stockItemsJson)
+    public static void OrderPaid(int orderId, IEnumerable<OrderStockItem> items)
     {
         Ensure();
-        CatalogGraft.OnOrderPaid(orderId, stockItemsJson ?? string.Empty);
+        var lines = (items ?? []).ToArray();
+        CatalogGraft.OnOrderPaid(orderId, new StockRequest(
+            lines.Select(item => item.ProductId).ToArray(),
+            lines.Select(item => item.Units).ToArray()));
     }
 
-    public static void OrderPaidWebhook(int orderId, string stockItemsJson)
+    public static void OrderPaidWebhook(int orderId, IEnumerable<OrderStockItem> items)
     {
         Ensure();
-        PaidWebhook.OnOrderPaid(orderId, stockItemsJson ?? string.Empty);
+        var lines = (items ?? []).ToArray();
+        PaidWebhook.OnOrderPaid(orderId, new WebhookStock(
+            lines.Select(item => item.ProductId).ToArray(),
+            lines.Select(item => item.Units).ToArray()));
     }
 
     public static void OrderShipped(int orderId, string orderStatus, string buyerName)

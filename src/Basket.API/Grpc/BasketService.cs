@@ -1,6 +1,5 @@
 // Graftcode basket slice — original Grpc/BasketService. Redis logic stays here.
 // Public methods replace the gRPC overrides. There is no Basket.BasketBase.
-using System.Text.Json;
 using eShop.Basket.API.IntegrationEvents.EventHandling;
 using eShop.Basket.API.IntegrationEvents.EventHandling.Events;
 using eShop.Basket.API.Model;
@@ -22,7 +21,6 @@ public class BasketService
         this.logger = logger;
     }
 
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object Gate = new();
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
     private static IServiceProvider AttachedServices;
@@ -36,16 +34,16 @@ public class BasketService
         return new AttachScope();
     }
 
-    public static string GetBasket(string buyerId) =>
+    public static BasketResult GetBasket(string buyerId) =>
         Locked(() => Block(service => service.Read(buyerId)));
 
-    public static string UpdateBasket(string buyerId, string itemsJson) =>
-        Locked(() => Block(service => service.Replace(buyerId, itemsJson)));
+    public static BasketResult UpdateBasket(string buyerId, int[] productIds, int[] quantities) =>
+        Locked(() => Block(service => service.Replace(buyerId, productIds, quantities)));
 
-    public static string DeleteBasket(string buyerId) =>
+    public static BasketResult DeleteBasket(string buyerId) =>
         Locked(() => Block(service => service.Remove(buyerId)));
 
-    public static string OnOrderStarted(string buyerId) =>
+    public static BasketResult OnOrderStarted(string buyerId) =>
         Locked(() => Task.Run(async () =>
         {
             var provider = AttachedServices;
@@ -66,11 +64,11 @@ public class BasketService
 
     public static int HostPid() => Environment.ProcessId;
 
-    internal async Task<string> Read(string buyerId)
+    internal async Task<BasketResult> Read(string buyerId)
     {
         if (string.IsNullOrEmpty(buyerId))
         {
-            return "[]";
+            return Lines(null);
         }
 
         if (logger.IsEnabled(LogLevel.Debug))
@@ -79,51 +77,34 @@ public class BasketService
         }
 
         var data = await repository.GetBasketAsync(buyerId);
-        if (data?.Items is not { Count: > 0 })
-        {
-            return "[]";
-        }
-
-        return JsonSerializer.Serialize(data.Items.Select(Line), JsonOptions);
+        return Lines(data?.Items);
     }
 
-    internal async Task<string> Replace(string buyerId, string itemsJson)
+    internal async Task<BasketResult> Replace(string buyerId, int[] productIds, int[] quantities)
     {
         if (string.IsNullOrEmpty(buyerId))
         {
             return Status("unauthenticated");
         }
 
-        List<BasketLine> lines;
-        try
-        {
-            lines = JsonSerializer.Deserialize<List<BasketLine>>(itemsJson, JsonOptions);
-        }
-        catch (JsonException ex)
-        {
-            return Status("badRequest", ex.Message);
-        }
-
+        var ids = productIds ?? [];
+        var quantitiesOrEmpty = quantities ?? [];
+        var count = Math.Min(ids.Length, quantitiesOrEmpty.Length);
         var basket = new CustomerBasket(buyerId);
-        foreach (var line in lines ?? [])
+        for (var i = 0; i < count; i++)
         {
             basket.Items.Add(new BasketItem
             {
-                ProductId = line.ProductId,
-                Quantity = line.Quantity
+                ProductId = ids[i],
+                Quantity = quantitiesOrEmpty[i]
             });
         }
 
         var saved = await repository.UpdateBasketAsync(basket);
-        if (saved is null)
-        {
-            return Status("notFound");
-        }
-
-        return JsonSerializer.Serialize((saved.Items ?? []).Select(Line), JsonOptions);
+        return saved is null ? Status("notFound") : Lines(saved.Items);
     }
 
-    internal async Task<string> Remove(string buyerId)
+    internal async Task<BasketResult> Remove(string buyerId)
     {
         if (string.IsNullOrEmpty(buyerId))
         {
@@ -134,14 +115,20 @@ public class BasketService
         return Status("deleted");
     }
 
-    private static BasketLine Line(BasketItem item) => new(item.ProductId, item.Quantity);
+    private static BasketResult Lines(IEnumerable<BasketItem> items)
+    {
+        var list = items?.ToList() ?? [];
+        return new BasketResult(
+            list.Count,
+            list.Select(item => item.ProductId).ToArray(),
+            list.Select(item => item.Quantity).ToArray(),
+            "ok",
+            null);
+    }
 
-    private static string Status(string status, string detail = null) =>
-        detail is null
-            ? JsonSerializer.Serialize(new StatusPayload(status), JsonOptions)
-            : JsonSerializer.Serialize(new ErrorPayload(status, detail), JsonOptions);
+    private static BasketResult Status(string status) => new(0, [], [], status, null);
 
-    private static string Locked(Func<string> action)
+    private static T Locked<T>(Func<T> action)
     {
         var mine = Environment.CurrentManagedThreadId == AttachThread;
         if (!mine)
@@ -162,7 +149,7 @@ public class BasketService
         }
     }
 
-    private static string Block(Func<BasketService, Task<string>> action) =>
+    private static T Block<T>(Func<BasketService, Task<T>> action) =>
         Task.Run(async () =>
         {
             var provider = AttachedServices;
@@ -200,10 +187,6 @@ public class BasketService
         return host;
     }
 
-    private sealed record BasketLine(int ProductId, int Quantity);
-    private sealed record StatusPayload(string Status);
-    private sealed record ErrorPayload(string Status, string Detail);
-
     private sealed class AttachScope : IDisposable
     {
         public void Dispose()
@@ -214,3 +197,5 @@ public class BasketService
         }
     }
 }
+
+public sealed record BasketResult(int Count, int[] ProductIds, int[] Quantities, string Status, string Detail);

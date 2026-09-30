@@ -16,15 +16,15 @@ public class OrderStatusChangedToPaidIntegrationEventHandler : IIntegrationEvent
         this.logger = logger;
     }
 
-    public static string OnOrderPaid(int orderId, string stockItemsJson) =>
+    public static GraftStatus OnOrderPaid(int orderId, StockRequest stockItems) =>
         GraftHost.Block(async provider =>
         {
-            var handler = Create(provider);
-            await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, GraftHost.ReadStock(stockItemsJson))).ConfigureAwait(false);
-            return GraftHost.Ok();
+            var handler = (IIntegrationEventHandler<OrderStatusChangedToPaidIntegrationEvent>)Create(provider);
+            await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, ReadStock(stockItems))).ConfigureAwait(false);
+            return new GraftStatus("ok");
         });
 
-    public async Task Handle(OrderStatusChangedToPaidIntegrationEvent @event)
+    async Task IIntegrationEventHandler<OrderStatusChangedToPaidIntegrationEvent>.Handle(OrderStatusChangedToPaidIntegrationEvent @event)
     {
         var subscriptions = await retriever.GetSubscriptionsOfType(WebhookType.OrderPaid);
 
@@ -33,6 +33,20 @@ public class OrderStatusChangedToPaidIntegrationEventHandler : IIntegrationEvent
         var whook = new WebhookData(WebhookType.OrderPaid, @event);
 
         await sender.SendAll(subscriptions, whook);
+    }
+
+    private static List<OrderStockItem> ReadStock(StockRequest stockItems)
+    {
+        var productIds = stockItems?.ProductIds ?? [];
+        var units = stockItems?.Units ?? [];
+        var count = Math.Min(productIds.Length, units.Length);
+        var items = new List<OrderStockItem>(count);
+        for (var i = 0; i < count; i++)
+        {
+            items.Add(new OrderStockItem(productIds[i], units[i]));
+        }
+
+        return items;
     }
 
     private static OrderStatusChangedToPaidIntegrationEventHandler Create(IServiceProvider provider) =>
