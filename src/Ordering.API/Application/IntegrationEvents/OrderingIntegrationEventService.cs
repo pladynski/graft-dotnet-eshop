@@ -132,8 +132,6 @@ public class OrderingIntegrationEventService(
 
     private static string StockJson(IEnumerable<OrderStockItem> items) =>
         JsonSerializer.Serialize(
-            (items ?? []).Select(item => new StockLine(item.ProductId, item.Units)),
+            (items ?? []).Select(item => new { productId = item.ProductId, units = item.Units }),
             JsonOptions);
-
-    private sealed record StockLine(int ProductId, int Units);
 }

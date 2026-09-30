@@ -97,11 +97,10 @@ public static class CatalogApi
         });
 
     public static StockDecision OnOrderAwaitingValidation(int orderId, StockRequest stockItems) =>
-        Block((provider, _) =>
+        Block(async (provider, _) =>
         {
             var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToAwaitingValidationIntegrationEventHandler>(provider);
-            StockDecisionCapture.Arm();
-            return AwaitDecision(handler, orderId, stockItems);
+            return await handler.DecideAsync(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockLines(stockItems))).ConfigureAwait(false);
         });
 
     public static string OnOrderPaid(int orderId, string stockItemsJson) =>
@@ -111,15 +110,6 @@ public static class CatalogApi
             await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, ReadStockItems(stockItemsJson))).ConfigureAwait(false);
             return "{\"status\":\"ok\"}";
         });
-
-    private static async Task<StockDecision> AwaitDecision(
-        OrderStatusChangedToAwaitingValidationIntegrationEventHandler handler,
-        int orderId,
-        StockRequest stockItems)
-    {
-        await handler.Handle(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockLines(stockItems))).ConfigureAwait(false);
-        return StockDecisionCapture.Take();
-    }
 
     private static List<OrderStockItem> ReadStockLines(StockRequest stockItems)
     {

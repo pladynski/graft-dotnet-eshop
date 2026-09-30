@@ -18,11 +18,6 @@ public sealed class CatalogIntegrationEventService(ILogger<CatalogIntegrationEve
             {
                 PriceChangedGraft.Publish(price);
             }
-            else
-            {
-                // Stock confirmed/rejected is returned to the ordering graft caller.
-                StockDecisionCapture.Record(evt);
-            }
 
             await integrationEventLogService.MarkEventAsPublishedAsync(evt.Id);
         }
