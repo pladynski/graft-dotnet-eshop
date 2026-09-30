@@ -145,7 +145,7 @@ Basket followed the same pattern, in the original file `src/Basket.API/Grpc/Bask
 
 Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (JSON with a MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
 
-`aspire run` still starts `catalog-api`, `basket-api`, `ordering-api`, `order-processor`, `payment-processor`, and `webhooks-api`. Those processes migrate data and keep their HTTP APIs. They do not subscribe to the Aspire event bus. Cross-service calls go through Gateway on RabbitmqPlugin when `ESHOP_GRAFT_TRANSPORT=rabbitmq` (the AppHost sets this on ordering, catalog, and the order processor). A standalone Gateway process sets `EshopGraftHost` so it does not also turn on storefront authentication. A price change calls `WebhookEvents.OnProductPriceChanged` on that same transport.
+`aspire run` still starts `catalog-api`, `basket-api`, `ordering-api`, `order-processor`, `payment-processor`, and `webhooks-api`. Those processes migrate data and keep their HTTP APIs. They do not subscribe to the Aspire event bus. Cross-service calls go through Gateway on RabbitmqPlugin when `ESHOP_GRAFT_TRANSPORT=rabbitmq` (the AppHost sets this on ordering, catalog, and the order processor). A standalone Gateway process sets `EshopGraftHost` so it does not also turn on storefront authentication. A price change calls `ProductPriceChangedIntegrationEventHandler.OnProductPriceChanged` on that same transport.
 
 ### In-place REST and gRPC → Graft
 
@@ -252,9 +252,9 @@ With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet,
 ```bash
 dotnet add package graft.nuget.catalog.api_063hpr -v 1.0.0 --source https://grft.dev/45702aba-f4ff-47e5-9157-bf8096d331aa__free
 dotnet add package graft.nuget.basket.api_4lefa6 -v 1.0.0 --source https://grft.dev/1d322126-f16f-4b21-9e9f-454bff8f240e__free
-dotnet add package graft.nuget.ordering.api_bxfi5d -v 1.0.0 --source https://grft.dev/f3186f02-ed28-470b-86a3-139135f4fe0e__free
-dotnet add package graft.nuget.paymentprocessor_k7lcrx -v 1.0.0 --source https://grft.dev/c1137070-797a-468f-b5ab-30cfcb3c7c10__free
-dotnet add package graft.nuget.webhooks.api_6y7npr -v 1.0.0 --source https://grft.dev/80c9f488-2db2-4223-a2f3-bdf5d46854f0__free
+dotnet add package graft.nuget.ordering.api_kmowfv -v 1.0.0 --source https://grft.dev/6bdbab5c-e6f2-47ed-99c2-2e43ef4749ce__free
+dotnet add package graft.nuget.paymentprocessor_2hchbx -v 1.0.0 --source https://grft.dev/fe8171ea-ebec-4496-860e-a0a48111bd04__free
+dotnet add package graft.nuget.webhooks.api_tu0l8p -v 1.0.0 --source https://grft.dev/fb4ccfe5-1a92-4aba-a688-fc33b25f196d__free
 ```
 
 `nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
@@ -304,15 +304,15 @@ Each old subscription is a public method on the service that already owned the h
 | `BasketService.OnOrderStarted` | `eshop.basket` / `eshop.basket.reply` | Basket subscription to `OrderStarted` |
 | `CatalogApi.OnOrderAwaitingValidation` | `eshop.catalog` / `eshop.catalog.reply` | Catalog subscription to awaiting-validation. Returns `confirmed` or `rejected` |
 | `CatalogApi.OnOrderPaid` | same catalog queues | Catalog subscription to paid |
-| `OrderingApi.OnGracePeriodConfirmed` | `eshop.ordering` / `eshop.ordering.reply` | Ordering subscription to grace period. Called by the order processor |
-| `PaymentApi.OnStockConfirmed` | `eshop.payment` / `eshop.payment.reply` | Payment subscription to stock confirmed. Returns `succeeded` or `failed` |
-| `WebhookEvents.OnOrderPaid`, `OnOrderShipped`, `OnProductPriceChanged` | `eshop.webhooks` / `eshop.webhooks.reply` | Webhooks subscriptions, including the price-changed handler |
+| `GracePeriodConfirmedIntegrationEventHandler.OnGracePeriodConfirmed` | `eshop.ordering` / `eshop.ordering.reply` | Ordering subscription to grace period. Called by the order processor |
+| `OrderStatusChangedToStockConfirmedIntegrationEventHandler.OnStockConfirmed` | `eshop.payment` / `eshop.payment.reply` | Payment subscription to stock confirmed. Returns `succeeded` or `failed` |
+| `OrderStatusChangedToPaidIntegrationEventHandler.OnOrderPaid`, `OrderStatusChangedToShippedIntegrationEventHandler.OnOrderShipped`, `ProductPriceChangedIntegrationEventHandler.OnProductPriceChanged` | `eshop.webhooks` / `eshop.webhooks.reply` | Webhooks subscriptions, including the price-changed handler |
 
-Ordering applies the catalog and payment return values in-process (`OrderingApi.ApplyStockConfirmedAsync`, `ApplyPaymentSucceededAsync`, and the other `Apply*` methods). Those methods are also hosted (`OnStockConfirmed`, `OnStockRejected`, `OnPaymentSucceeded`, `OnPaymentFailed`) but the live path does not RPC back into the ordering queue. The ordering call is still on the stack, and one RabbitmqPlugin consumer would deadlock on a nested call to itself.
+Ordering applies the catalog and payment return values in-process (`OrderStockConfirmedIntegrationEventHandler.Apply`, `OrderPaymentSucceededIntegrationEventHandler.Apply`, and the other handler `Apply` methods). Those methods are also hosted (`OnStockConfirmed`, `OnStockRejected`, `OnPaymentSucceeded`, `OnPaymentFailed`) but the live path does not RPC back into the ordering queue. The ordering call is still on the stack, and one RabbitmqPlugin consumer would deadlock on a nested call to itself.
 
 The storefront orders page (`OrdersRefreshOnStatusChange.razor`) polls every 5 seconds. The old handlers only called `OrderStatusNotificationService` inside the Blazor process. A graft hosted by `gg` runs in a different process and cannot refresh that circuit, so WebApp has no queue and no `AddRabbitMqEventBus`.
 
-`Ordering.API` calls the basket, catalog, payment, and webhooks grafts. `Catalog.API` calls the webhooks graft for a price change. `OrderProcessor` calls `OrderingApi.OnGracePeriodConfirmed`. Example:
+`Ordering.API` calls the basket, catalog, payment, and webhooks grafts. `Catalog.API` calls the webhooks graft for a price change. `OrderProcessor` calls `GracePeriodConfirmedIntegrationEventHandler.OnGracePeriodConfirmed`. Example:
 
 ```csharp
 CatalogGraft.OnOrderAwaitingValidation(orderId, stockItemsJson);
@@ -337,9 +337,9 @@ export ConnectionStrings__webhooksdb="Host=localhost;Port=5432;Database=webhooks
 
 ./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi
 ./gg /path/to/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json --types eShop.Basket.API.BasketService
-./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.OrderingApi
-./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.PaymentApi
-./gg /path/to/Webhooks.API.dll --config graft/pluginConfig.webhooks.rabbitmq.json --types Webhooks.API.WebhookEvents
+./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockRejectedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentSucceededIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentFailedIntegrationEventHandler
+./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler
+./gg /path/to/Webhooks.API.dll --config graft/pluginConfig.webhooks.rabbitmq.json --types Webhooks.API.IntegrationEvents.OrderStatusChangedToPaidIntegrationEventHandler,Webhooks.API.IntegrationEvents.OrderStatusChangedToShippedIntegrationEventHandler,Webhooks.API.IntegrationEvents.ProductPriceChangedIntegrationEventHandler
 ```
 
 The storefront websocket gateway on port 8000 can still host catalog and basket for reads. Integration calls use the RabbitmqPlugin processes above, even when the browser path stays on `ws://localhost:8000/ws`. If `ESHOP_GRAFT_TRANSPORT` is not `rabbitmq`, ordering logs and skips the remote call so unit tests do not need a broker. The AppHost sets the variable. Without the five `gg` processes and a matching `ESHOP_GRAFT_PLUGIN_HOST`, order stock, payment, basket cleanup, and webhooks do not run.

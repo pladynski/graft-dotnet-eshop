@@ -1,5 +1,5 @@
 using eShop.Graft;
-using OrderingGraft = graft.nuget.eShop.Ordering.API.OrderingApi;
+using OrderingGraft = graft.nuget.eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler;
 
 namespace eShop.OrderProcessor.Services;
 
@@ -15,7 +15,7 @@ internal static class OrderingLifecycle
         if (!GraftRabbit.TransportEnabled)
         {
             throw new InvalidOperationException(
-                "Set ESHOP_GRAFT_TRANSPORT=rabbitmq so grace period calls OrderingApi.OnGracePeriodConfirmed.");
+                "Set ESHOP_GRAFT_TRANSPORT=rabbitmq so grace period calls GracePeriodConfirmedIntegrationEventHandler.OnGracePeriodConfirmed.");
         }
 
         Ensure();

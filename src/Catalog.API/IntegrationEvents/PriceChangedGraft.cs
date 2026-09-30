@@ -1,7 +1,7 @@
 // Generated webhooks graft. Swap ESHOP_GRAFT_PLUGIN_NAME to move this call to another broker plugin.
 using System.Globalization;
 using eShop.Graft;
-using WebhookGraft = graft.nuget.Webhooks.API.WebhookEvents;
+using WebhookGraft = graft.nuget.Webhooks.API.IntegrationEvents.ProductPriceChangedIntegrationEventHandler;
 
 namespace eShop.Catalog.API.IntegrationEvents;
 

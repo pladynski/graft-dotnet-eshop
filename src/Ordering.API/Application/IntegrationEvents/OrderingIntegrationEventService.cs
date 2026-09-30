@@ -94,13 +94,13 @@ public class OrderingIntegrationEventService(
         await using var scope = _scopeFactory.CreateAsyncScope();
         if (string.Equals(decision.Result, "confirmed", StringComparison.OrdinalIgnoreCase))
         {
-            await OrderingApi.ApplyStockConfirmedAsync(scope.ServiceProvider, orderId);
+            await OrderStockConfirmedIntegrationEventHandler.Apply(scope.ServiceProvider, orderId);
             return;
         }
 
         if (string.Equals(decision.Result, "rejected", StringComparison.OrdinalIgnoreCase))
         {
-            await OrderingApi.ApplyStockRejectedAsync(scope.ServiceProvider, orderId, decision.ProductIds ?? []);
+            await OrderStockRejectedIntegrationEventHandler.Apply(scope.ServiceProvider, orderId, decision.ProductIds ?? []);
             return;
         }
 
@@ -113,13 +113,13 @@ public class OrderingIntegrationEventService(
         await using var scope = _scopeFactory.CreateAsyncScope();
         if (string.Equals(value, "succeeded", StringComparison.OrdinalIgnoreCase))
         {
-            await OrderingApi.ApplyPaymentSucceededAsync(scope.ServiceProvider, orderId);
+            await OrderPaymentSucceededIntegrationEventHandler.Apply(scope.ServiceProvider, orderId);
             return;
         }
 
         if (string.Equals(value, "failed", StringComparison.OrdinalIgnoreCase))
         {
-            await OrderingApi.ApplyPaymentFailedAsync(scope.ServiceProvider, orderId);
+            await OrderPaymentFailedIntegrationEventHandler.Apply(scope.ServiceProvider, orderId);
             return;
         }
 

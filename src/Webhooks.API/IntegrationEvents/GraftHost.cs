@@ -1,22 +1,29 @@
-// Graftcode payment slice — the stock-confirmed handler is the public method Gateway hosts.
-using Microsoft.Extensions.DependencyInjection;
+// Shared DI host for the graft methods on the webhook handlers. Not a graft type.
+namespace Webhooks.API.IntegrationEvents;
 
-namespace eShop.PaymentProcessor;
-
-public static class PaymentApi
+internal static class GraftHost
 {
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
 
-    public static int HostPid() => Environment.ProcessId;
-
-    public static string OnStockConfirmed(int orderId) =>
+    internal static string Block(Func<IServiceProvider, Task<string>> action) =>
         Task.Run(async () =>
         {
             var host = await HostTask.Value.ConfigureAwait(false);
             await using var scope = host.Services.CreateAsyncScope();
-            var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToStockConfirmedIntegrationEventHandler>(scope.ServiceProvider);
-            return await handler.Handle(new OrderStatusChangedToStockConfirmedIntegrationEvent(orderId)).ConfigureAwait(false);
+            return await action(scope.ServiceProvider).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
+
+    internal static string Ok() => "{\"status\":\"ok\"}";
+
+    internal static List<OrderStockItem> ReadStock(string stockItemsJson)
+    {
+        if (string.IsNullOrWhiteSpace(stockItemsJson))
+        {
+            return [];
+        }
+
+        return JsonSerializer.Deserialize<List<OrderStockItem>>(stockItemsJson, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+    }
 
     private static async Task<IHost> StartHostAsync()
     {
@@ -24,16 +31,21 @@ public static class PaymentApi
         var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
         {
             ContentRootPath = contentRoot,
-            ApplicationName = "PaymentProcessor"
+            ApplicationName = "Webhooks.API"
         });
 
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string>
         {
             ["EshopGraftHost"] = "true"
         });
-        builder.AddBasicServiceDefaults();
-        builder.Services.AddOptions<PaymentOptions>()
-            .BindConfiguration(nameof(PaymentOptions));
+        builder.AddServiceDefaults();
+        builder.AddApplicationServices();
+
+        if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("webhooksdb")))
+        {
+            throw new InvalidOperationException(
+                "Webhooks graft host requires ConnectionStrings__webhooksdb. Aspire injects this for webhooks-api; a standalone Gateway process needs it set.");
+        }
 
         var host = builder.Build();
         await host.StartAsync().ConfigureAwait(false);
@@ -51,7 +63,7 @@ public static class PaymentApi
         var dir = new DirectoryInfo(baseDir);
         for (var i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
         {
-            if (File.Exists(Path.Combine(dir.FullName, "PaymentProcessor.csproj"))
+            if (File.Exists(Path.Combine(dir.FullName, "Webhooks.API.csproj"))
                 && File.Exists(Path.Combine(dir.FullName, "appsettings.json")))
             {
                 return dir.FullName;

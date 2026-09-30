@@ -1,8 +1,31 @@
 ﻿namespace eShop.Ordering.API.Application.IntegrationEvents.EventHandling;
-public class OrderStockRejectedIntegrationEventHandler(
-    IMediator mediator,
-    ILogger<OrderStockRejectedIntegrationEventHandler> logger) : IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>
+
+public class OrderStockRejectedIntegrationEventHandler : IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>
 {
+    private readonly IMediator mediator;
+    private readonly ILogger<OrderStockRejectedIntegrationEventHandler> logger;
+
+    private OrderStockRejectedIntegrationEventHandler(
+        IMediator mediator,
+        ILogger<OrderStockRejectedIntegrationEventHandler> logger)
+    {
+        this.mediator = mediator;
+        this.logger = logger;
+    }
+
+    public static string OnStockRejected(int orderId, string productIds) =>
+        GraftHost.Block(async provider =>
+        {
+            await Apply(provider, orderId, GraftHost.ParseIds(productIds)).ConfigureAwait(false);
+            return GraftHost.Ok();
+        });
+
+    internal static Task Apply(IServiceProvider provider, int orderId, IEnumerable<int> productIds)
+    {
+        var items = productIds.Select(id => new ConfirmedOrderStockItem(id, false)).ToList();
+        return Create(provider).Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
+    }
+
     public async Task Handle(OrderStockRejectedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
@@ -23,4 +46,9 @@ public class OrderStockRejectedIntegrationEventHandler(
 
         await mediator.Send(command);
     }
+
+    private static OrderStockRejectedIntegrationEventHandler Create(IServiceProvider provider) =>
+        new(
+            provider.GetRequiredService<IMediator>(),
+            provider.GetRequiredService<ILogger<OrderStockRejectedIntegrationEventHandler>>());
 }

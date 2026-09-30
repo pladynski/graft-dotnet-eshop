@@ -2,8 +2,9 @@
 using eShop.Graft;
 using BasketGraft = graft.nuget.eShop.Basket.API.BasketService;
 using CatalogGraft = graft.nuget.eShop.Catalog.API.CatalogApi;
-using PaymentGraft = graft.nuget.eShop.PaymentProcessor.PaymentApi;
-using WebhookGraft = graft.nuget.Webhooks.API.WebhookEvents;
+using PaymentGraft = graft.nuget.eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler;
+using PaidWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToPaidIntegrationEventHandler;
+using ShippedWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToShippedIntegrationEventHandler;
 
 namespace eShop.Ordering.API.Application.IntegrationEvents;
 
@@ -39,13 +40,13 @@ internal static class GraftCalls
     public static void OrderPaidWebhook(int orderId, string stockItemsJson)
     {
         Ensure();
-        WebhookGraft.OnOrderPaid(orderId, stockItemsJson ?? string.Empty);
+        PaidWebhook.OnOrderPaid(orderId, stockItemsJson ?? string.Empty);
     }
 
     public static void OrderShipped(int orderId, string orderStatus, string buyerName)
     {
         Ensure();
-        WebhookGraft.OnOrderShipped(orderId, orderStatus ?? string.Empty, buyerName ?? string.Empty);
+        ShippedWebhook.OnOrderShipped(orderId, orderStatus ?? string.Empty, buyerName ?? string.Empty);
     }
 
     private static void Ensure()
