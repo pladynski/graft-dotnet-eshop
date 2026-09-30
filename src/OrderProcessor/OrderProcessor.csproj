@@ -8,11 +8,12 @@
 
   <ItemGroup>
     <PackageReference Include="Aspire.Npgsql" />
+    <PackageReference Include="graft.nuget.ordering.api_bxfi5d" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\eShop.ServiceDefaults\eShop.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\EventBusRabbitMQ\EventBusRabbitMQ.csproj" />
+    <Compile Include="..\Shared\GraftRabbit.cs" Link="GraftRabbit.cs" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Application.UnitTests" />

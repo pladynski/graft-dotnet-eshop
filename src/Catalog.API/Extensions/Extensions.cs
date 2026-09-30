@@ -1,4 +1,4 @@
-﻿// Graftcode catalog slice — gateway host skips the shared Rabbit consumer.
+﻿// Graftcode catalog slice — order stock is a graft method, not a Rabbit consumer.
 using eShop.Catalog.API.Services;
 
 public static class Extensions
@@ -29,19 +29,6 @@ public static class Extensions
 
         builder.Services.AddTransient<ICatalogIntegrationEventService, CatalogIntegrationEventService>();
 
-        // Gateway hosts call the public methods directly. They must not join the Aspire
-        // consumer queue or they steal integration events from catalog-api.
-        if (builder.Configuration.GetValue("EshopGraftHost", false))
-        {
-            builder.Services.AddSingleton<IEventBus, NoOpEventBus>();
-        }
-        else
-        {
-            builder.AddRabbitMqEventBus("eventbus")
-                   .AddSubscription<OrderStatusChangedToAwaitingValidationIntegrationEvent, OrderStatusChangedToAwaitingValidationIntegrationEventHandler>()
-                   .AddSubscription<OrderStatusChangedToPaidIntegrationEvent, OrderStatusChangedToPaidIntegrationEventHandler>();
-        }
-
         builder.Services.AddOptions<CatalogOptions>()
             .BindConfiguration(nameof(CatalogOptions));
 
@@ -57,10 +44,5 @@ public static class Extensions
         }
 
         builder.Services.AddScoped<ICatalogAI, CatalogAI>();
-    }
-
-    private sealed class NoOpEventBus : IEventBus
-    {
-        public Task PublishAsync(IntegrationEvent @event) => Task.CompletedTask;
     }
 }

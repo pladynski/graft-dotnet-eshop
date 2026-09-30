@@ -6,7 +6,7 @@ A reference .NET application implementing an e-commerce website using a services
 
 ![eShop homepage screenshot](img/eshop_homepage.png)
 
-This fork keeps the AdventureWorks services. Catalog reads and basket updates from the Blazor storefront are in-place Graftcode facades: the original `CatalogApi` and `BasketService` methods, called through Graftcode Gateway instead of catalog REST and basket gRPC. Ordering, identity, and payment are unchanged. Fire-and-forget integration events still use the RabbitMQ event bus. See [Catalog and basket on Graftcode](#catalog-and-basket-on-graftcode).
+This fork keeps the AdventureWorks services. Catalog reads and basket updates from the Blazor storefront are in-place Graftcode facades: the original `CatalogApi` and `BasketService` methods, called through Graftcode Gateway instead of catalog REST and basket gRPC. Order integration that used to publish on the Aspire RabbitMQ event bus (order started, stock, payment, price, webhooks) is the same style of graft call over [RabbitmqPlugin](https://github.com/grft-dev/graftcode-plugins/tree/main/rabbitmq). Moving that path to Service Bus later is a plugin name and config change, not a new call site. The storefront orders page polls, because a Gateway process does not own the Blazor circuit. See [Catalog and basket on Graftcode](#catalog-and-basket-on-graftcode).
 
 ## Getting Started
 
@@ -145,7 +145,7 @@ Basket followed the same pattern. `src/Basket.API/BasketService.cs` still talks 
 
 Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (JSON with a MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
 
-`aspire run` still starts `catalog-api` and `basket-api`. Those processes migrate data and stay on the RabbitMQ event bus for fire-and-forget integration events (order stock, order status, `OrderStarted`). They are not the storefront's catalog or basket RPC path. A standalone Gateway process sets `EshopGraftHost` so it does not subscribe to that shared queue. A price change made through the gateway is not published onto the event bus.
+`aspire run` still starts `catalog-api`, `basket-api`, `ordering-api`, `order-processor`, `payment-processor`, and `webhooks-api`. Those processes migrate data and keep their HTTP APIs. They do not subscribe to the Aspire event bus. Cross-service calls go through Gateway on RabbitmqPlugin when `ESHOP_GRAFT_TRANSPORT=rabbitmq` (the AppHost sets this on ordering, catalog, and the order processor). A standalone Gateway process sets `EshopGraftHost` so it does not also turn on storefront authentication. A price change calls `WebhookEvents.OnProductPriceChanged` on that same transport.
 
 ### In-place REST and gRPC → Graft
 
@@ -185,15 +185,15 @@ Counted non-blank, non-comment lines against `main`. The storefront calls genera
 | Piece | Before | After |
 | --- | ---: | ---: |
 | `MapCatalogApi` route table | 95 | 0 |
-| `CatalogApi.cs` | 389 | 389 |
+| `CatalogApi.cs` | 389 | 419 |
 | `CatalogService` | 71 | 90 |
 | `Catalog.API` `Program.cs` | 15 | 7 |
 | gRPC `Basket.API/Grpc/BasketService.cs` | 91 | 0 |
-| `Basket.API/BasketService.cs` | 0 | 159 |
+| `Basket.API/BasketService.cs` | 0 | 179 |
 | Web app `BasketService` | 40 | 92 |
 | `basket.proto` | 24 | 0 |
 
-`CatalogApi.cs` is the same size because the 95-line route table was replaced by public method wrappers and the code that hosts them. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). Those clients only set `GraftConfig` and parse JSON. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 479 non-blank lines.
+`CatalogApi.cs` grew from 389 to 419 non-blank lines. The route table was replaced by public method wrappers, and order-stock handlers are now `OnOrderAwaitingValidation` and `OnOrderPaid` on the same class. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). Those clients only set `GraftConfig` and parse JSON. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 509 non-blank lines. `Basket.API/BasketService.cs` is 179 lines, including `OnOrderStarted`.
 
 Generated OpenAPI documents (`Catalog.API.json`, 1260 lines, and `Catalog.API_v2.json`, 1043 lines) and `Catalog.API.http` left with the route table. They were generated contracts, not the query logic.
 
@@ -251,8 +251,11 @@ The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets
 With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet, and copy the install command. The packages checked in for this slice were produced that way:
 
 ```bash
-dotnet add package graft.nuget.catalog.api_696z8d -v 1.0.0 --source https://grft.dev/51ed3831-b5ff-4f17-95b4-7b21997750ba__free
-dotnet add package graft.nuget.basket.api_4lefa6 -v 1.0.0 --source https://grft.dev/78c14abf-0cee-46be-b443-c50b167d9f93__free
+dotnet add package graft.nuget.catalog.api_063hpr -v 1.0.0 --source https://grft.dev/45702aba-f4ff-47e5-9157-bf8096d331aa__free
+dotnet add package graft.nuget.basket.api_4lefa6 -v 1.0.0 --source https://grft.dev/1d322126-f16f-4b21-9e9f-454bff8f240e__free
+dotnet add package graft.nuget.ordering.api_bxfi5d -v 1.0.0 --source https://grft.dev/f3186f02-ed28-470b-86a3-139135f4fe0e__free
+dotnet add package graft.nuget.paymentprocessor_k7lcrx -v 1.0.0 --source https://grft.dev/c1137070-797a-468f-b5ab-30cfcb3c7c10__free
+dotnet add package graft.nuget.webhooks.api_6y7npr -v 1.0.0 --source https://grft.dev/80c9f488-2db2-4223-a2f3-bdf5d46854f0__free
 ```
 
 `nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
@@ -291,7 +294,60 @@ export CATALOG_GRAFT_PLUGIN_CONFIG=$PWD/graft/graftConfig.catalog.json
 export BASKET_GRAFT_PLUGIN_CONFIG=$PWD/graft/graftConfig.basket.json
 ```
 
-Aspire already starts a RabbitMQ container named `eventbus` for integration events. To run the plugin on that broker, copy its published host port, user, and password from the Aspire dashboard into the sample JSON and into `*_GRAFT_PLUGIN_HOST` (`host:port`). Aspire does not publish guest/guest on port 5672 unless you set that yourself. The event bus and the plugin are different uses of the same broker: order and stock events stay on the event bus; catalog and basket method calls use the plugin queues only when the transport variables are `rabbitmq`.
+Aspire still starts the RabbitMQ container named `eventbus`. Nothing in Catalog, Basket, Ordering, OrderProcessor, PaymentProcessor, WebApp, or Webhooks calls `AddRabbitMqEventBus` anymore. The container is the broker for RabbitmqPlugin. Copy its published host port, user, and password from the Aspire dashboard into the sample JSON and into `ESHOP_GRAFT_PLUGIN_HOST` (`host:port`). Aspire does not publish guest/guest on port 5672 unless you set that yourself. The AppHost default is `localhost:5672`.
+
+### Integration events as graft calls
+
+Each old subscription is a public method on the service that already owned the handler. Callers use the generated graft as a local method. `GraftConfig.SetConfig` sends the plugin block (the same shape as `graft/graftConfig.*.json`). One plugin config is one queue pair, so each module is its own `gg` process.
+
+| Call | Queue pair | What it replaces |
+| --- | --- | --- |
+| `BasketService.OnOrderStarted` | `eshop.basket` / `eshop.basket.reply` | Basket subscription to `OrderStarted` |
+| `CatalogApi.OnOrderAwaitingValidation` | `eshop.catalog` / `eshop.catalog.reply` | Catalog subscription to awaiting-validation. Returns `confirmed` or `rejected` |
+| `CatalogApi.OnOrderPaid` | same catalog queues | Catalog subscription to paid |
+| `OrderingApi.OnGracePeriodConfirmed` | `eshop.ordering` / `eshop.ordering.reply` | Ordering subscription to grace period. Called by the order processor |
+| `PaymentApi.OnStockConfirmed` | `eshop.payment` / `eshop.payment.reply` | Payment subscription to stock confirmed. Returns `succeeded` or `failed` |
+| `WebhookEvents.OnOrderPaid`, `OnOrderShipped`, `OnProductPriceChanged` | `eshop.webhooks` / `eshop.webhooks.reply` | Webhooks subscriptions, including the price-changed handler |
+
+Ordering applies the catalog and payment return values in-process (`OrderingApi.ApplyStockConfirmedAsync`, `ApplyPaymentSucceededAsync`, and the other `Apply*` methods). Those methods are also hosted (`OnStockConfirmed`, `OnStockRejected`, `OnPaymentSucceeded`, `OnPaymentFailed`) but the live path does not RPC back into the ordering queue. The ordering call is still on the stack, and one RabbitmqPlugin consumer would deadlock on a nested call to itself.
+
+The storefront orders page (`OrdersRefreshOnStatusChange.razor`) polls every 5 seconds. The old handlers only called `OrderStatusNotificationService` inside the Blazor process. A graft hosted by `gg` runs in a different process and cannot refresh that circuit, so WebApp has no queue and no `AddRabbitMqEventBus`.
+
+`Ordering.API` calls the basket, catalog, payment, and webhooks grafts. `Catalog.API` calls the webhooks graft for a price change. `OrderProcessor` calls `OrderingApi.OnGracePeriodConfirmed`. Example:
+
+```csharp
+CatalogGraft.OnOrderAwaitingValidation(orderId, stockItemsJson);
+PaymentGraft.OnStockConfirmed(orderId);
+OrderingGraft.OnGracePeriodConfirmed(orderId);
+```
+
+Run the integration gateways (declare each queue pair first). Point them at the same RabbitMQ Aspire published, and pass the database connection strings those modules already use:
+
+```bash
+export ESHOP_GRAFT_TRANSPORT=rabbitmq
+export ESHOP_GRAFT_PLUGIN_HOST=localhost:5672
+export ESHOP_GRAFT_PLUGIN_USER=guest
+export ESHOP_GRAFT_PLUGIN_PASSWORD=guest
+# Later Service Bus: change the plugin name (and its fields). Call sites stay as they are.
+# export ESHOP_GRAFT_PLUGIN_NAME=ServiceBusPlugin
+
+export ConnectionStrings__catalogdb="Host=localhost;Port=5432;Database=catalogdb;Username=postgres;Password=..."
+export ConnectionStrings__redis="localhost:6379"
+export ConnectionStrings__orderingdb="Host=localhost;Port=5432;Database=orderingdb;Username=postgres;Password=..."
+export ConnectionStrings__webhooksdb="Host=localhost;Port=5432;Database=webhooksdb;Username=postgres;Password=..."
+
+./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi
+./gg /path/to/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json --types eShop.Basket.API.BasketService
+./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.OrderingApi
+./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.PaymentApi
+./gg /path/to/Webhooks.API.dll --config graft/pluginConfig.webhooks.rabbitmq.json --types Webhooks.API.WebhookEvents
+```
+
+The storefront websocket gateway on port 8000 can still host catalog and basket for reads. Integration calls use the RabbitmqPlugin processes above, even when the browser path stays on `ws://localhost:8000/ws`. If `ESHOP_GRAFT_TRANSPORT` is not `rabbitmq`, ordering logs and skips the remote call so unit tests do not need a broker. The AppHost sets the variable. Without the five `gg` processes and a matching `ESHOP_GRAFT_PLUGIN_HOST`, order stock, payment, basket cleanup, and webhooks do not run.
+
+Server configs are `graft/pluginConfig.*.rabbitmq.json` (`gg --config`). Client samples are `graft/graftConfig.*.json` (`GraftConfig.SetConfig`). Do not pass a server file to `SetConfig`. The integration processes build that client JSON from the environment variables above. `ESHOP_GRAFT_PLUGIN_NAME` defaults to `RabbitmqPlugin`. If the built library is `libRabbitmqPlugin.dll`, set the name to `libRabbitmqPlugin`.
+
+The `EventBus` and `EventBusRabbitMQ` projects are still in the tree. No service registers the bus.
 
 ## Contributing
 

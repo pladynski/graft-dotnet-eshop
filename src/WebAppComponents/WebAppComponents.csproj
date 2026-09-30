@@ -14,7 +14,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
-    <PackageReference Include="graft.nuget.catalog.api_696z8d" />
+    <PackageReference Include="graft.nuget.catalog.api_063hpr" />
   </ItemGroup>
 
 </Project>

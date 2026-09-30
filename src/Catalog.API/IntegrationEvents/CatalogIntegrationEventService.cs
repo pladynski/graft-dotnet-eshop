@@ -1,7 +1,6 @@
 ﻿namespace eShop.Catalog.API.IntegrationEvents;
 
 public sealed class CatalogIntegrationEventService(ILogger<CatalogIntegrationEventService> logger,
-    IEventBus eventBus,
     CatalogContext catalogContext,
     IIntegrationEventLogService integrationEventLogService)
     : ICatalogIntegrationEventService, IDisposable
@@ -15,7 +14,16 @@ public sealed class CatalogIntegrationEventService(ILogger<CatalogIntegrationEve
             logger.LogInformation("Publishing integration event: {IntegrationEventId_published} - ({@IntegrationEvent})", evt.Id, evt);
 
             await integrationEventLogService.MarkEventAsInProgressAsync(evt.Id);
-            await eventBus.PublishAsync(evt);
+            if (evt is ProductPriceChangedIntegrationEvent price)
+            {
+                PriceChangedGraft.Publish(price);
+            }
+            else
+            {
+                // Stock confirmed/rejected is returned to the ordering graft caller.
+                StockDecisionCapture.Record(evt);
+            }
+
             await integrationEventLogService.MarkEventAsPublishedAsync(evt.Id);
         }
         catch (Exception ex)

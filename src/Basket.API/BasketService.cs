@@ -1,7 +1,10 @@
 // Graftcode basket slice — gRPC overrides are public methods on BasketService.
 using System.Text.Json;
+using eShop.Basket.API.IntegrationEvents.EventHandling;
+using eShop.Basket.API.IntegrationEvents.EventHandling.Events;
 using eShop.Basket.API.Model;
 using eShop.Basket.API.Repositories;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace eShop.Basket.API;
 
@@ -40,6 +43,25 @@ public class BasketService
 
     public static string DeleteBasket(string buyerId) =>
         Locked(() => Block(service => service.Remove(buyerId)));
+
+    public static string OnOrderStarted(string buyerId) =>
+        Locked(() => Task.Run(async () =>
+        {
+            var provider = AttachedServices;
+            if (provider is null)
+            {
+                var host = await HostTask.Value.ConfigureAwait(false);
+                provider = host.Services;
+            }
+
+            await using var scope = provider.CreateAsyncScope();
+            var repository = scope.ServiceProvider.GetRequiredService<IBasketRepository>();
+            var logger = scope.ServiceProvider.GetService<ILogger<OrderStartedIntegrationEventHandler>>()
+                ?? NullLogger<OrderStartedIntegrationEventHandler>.Instance;
+            var handler = new OrderStartedIntegrationEventHandler(repository, logger);
+            await handler.Handle(new OrderStartedIntegrationEvent(buyerId ?? string.Empty)).ConfigureAwait(false);
+            return Status("deleted");
+        }).GetAwaiter().GetResult());
 
     public static int HostPid() => Environment.ProcessId;
 

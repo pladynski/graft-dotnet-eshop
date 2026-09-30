@@ -1,26 +1,52 @@
 ﻿@using Microsoft.AspNetCore.Components.Authorization
 @rendermode InteractiveServer
 @inject AuthenticationStateProvider AuthenticationStateProvider
-@inject OrderStatusNotificationService OrderStatusNotificationService
 @inject NavigationManager Nav
 @implements IDisposable
 @code {
-    private IDisposable? orderStatusChangedSubscription;
+    private PeriodicTimer? timer;
+    private readonly CancellationTokenSource stopping = new();
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender)
+        if (!firstRender)
         {
-            var buyerId = await AuthenticationStateProvider.GetBuyerIdAsync();
-            if (!string.IsNullOrEmpty(buyerId))
+            return;
+        }
+
+        // Order status used to arrive on the RabbitMQ event bus and refresh this circuit.
+        // RabbitmqPlugin delivers a call to a Gateway process, which does not own the circuit,
+        // so the orders page polls instead.
+        var buyerId = await AuthenticationStateProvider.GetBuyerIdAsync();
+        if (string.IsNullOrEmpty(buyerId))
+        {
+            return;
+        }
+
+        timer = new PeriodicTimer(TimeSpan.FromSeconds(5));
+        _ = PollAsync();
+    }
+
+    private async Task PollAsync()
+    {
+        if (timer is null)
+        {
+            return;
+        }
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(stopping.Token))
             {
-                orderStatusChangedSubscription = OrderStatusNotificationService.SubscribeToOrderStatusNotifications(
-                    buyerId, () => InvokeAsync(HandleOrderStatusChanged));
+                await InvokeAsync(Refresh);
             }
+        }
+        catch (OperationCanceledException)
+        {
         }
     }
 
-    private void HandleOrderStatusChanged()
+    private void Refresh()
     {
         try
         {
@@ -28,14 +54,14 @@
         }
         catch (Exception ex)
         {
-            // If there's an exception, we want to handle it on this circuit,
-            // and not throw it to the upstream caller
             _ = DispatchExceptionAsync(ex);
         }
     }
 
     public void Dispose()
     {
-        orderStatusChangedSubscription?.Dispose();
+        stopping.Cancel();
+        timer?.Dispose();
+        stopping.Dispose();
     }
 }

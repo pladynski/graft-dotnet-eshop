@@ -109,6 +109,17 @@ public class BasketServiceTests
     }
 
     [TestMethod]
+    public async Task OnOrderStartedDeletesBasket()
+    {
+        var repository = Substitute.For<IBasketRepository>();
+
+        using var document = JsonDocument.Parse(Call(repository, _ => BasketService.OnOrderStarted("buyer-1")));
+
+        Assert.AreEqual("deleted", document.RootElement.GetProperty("status").GetString());
+        await repository.Received(1).DeleteBasketAsync("buyer-1");
+    }
+
+    [TestMethod]
     public async Task OrderStartedEventRemovesUsersBasket()
     {
         var repository = Substitute.For<IBasketRepository>();

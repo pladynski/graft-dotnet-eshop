@@ -96,6 +96,41 @@ public static class CatalogApi
             return ToJson(new PicturePayload(picture.Value.Mime, Convert.ToBase64String(bytes)));
         });
 
+    public static string OnOrderAwaitingValidation(int orderId, string stockItemsJson) =>
+        Block((provider, _) =>
+        {
+            var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToAwaitingValidationIntegrationEventHandler>(provider);
+            StockDecisionCapture.Arm();
+            return AwaitDecision(handler, orderId, stockItemsJson);
+        });
+
+    public static string OnOrderPaid(int orderId, string stockItemsJson) =>
+        Block(async (provider, _) =>
+        {
+            var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToPaidIntegrationEventHandler>(provider);
+            await handler.Handle(new OrderStatusChangedToPaidIntegrationEvent(orderId, ReadStockItems(stockItemsJson))).ConfigureAwait(false);
+            return "{\"status\":\"ok\"}";
+        });
+
+    private static async Task<string> AwaitDecision(
+        OrderStatusChangedToAwaitingValidationIntegrationEventHandler handler,
+        int orderId,
+        string stockItemsJson)
+    {
+        await handler.Handle(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockItems(stockItemsJson))).ConfigureAwait(false);
+        return StockDecisionCapture.ToJson(JsonOptions);
+    }
+
+    private static List<OrderStockItem> ReadStockItems(string stockItemsJson)
+    {
+        if (string.IsNullOrWhiteSpace(stockItemsJson))
+        {
+            return [];
+        }
+
+        return JsonSerializer.Deserialize<List<OrderStockItem>>(stockItemsJson, JsonOptions) ?? [];
+    }
+
     internal static async Task<PaginatedItems<CatalogItem>> ListItemsAsync(
         CatalogServices services,
         int pageIndex,
