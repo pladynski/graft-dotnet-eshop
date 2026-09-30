@@ -412,6 +412,12 @@ public static class CatalogApi
     private static string ResolveContentRoot()
     {
         var baseDir = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(baseDir))
+        {
+            // Gateway loads the module with an empty base directory.
+            baseDir = Path.GetDirectoryName(typeof(CatalogApi).Assembly.Location) ?? string.Empty;
+        }
+
         if (File.Exists(Path.Combine(baseDir, "appsettings.json")))
         {
             return baseDir;

@@ -55,6 +55,11 @@ internal static class GraftHost
     private static string ResolveContentRoot()
     {
         var baseDir = AppContext.BaseDirectory;
+        if (string.IsNullOrEmpty(baseDir))
+        {
+            baseDir = Path.GetDirectoryName(typeof(GraftHost).Assembly.Location) ?? string.Empty;
+        }
+
         if (File.Exists(Path.Combine(baseDir, "appsettings.json")))
         {
             return baseDir;
