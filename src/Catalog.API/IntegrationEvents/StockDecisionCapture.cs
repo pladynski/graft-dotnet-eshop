@@ -5,15 +5,18 @@ namespace eShop.Catalog.API.IntegrationEvents;
 
 internal static class StockDecisionCapture
 {
-    private static readonly AsyncLocal<IntegrationEvent?> Pending = new();
+    // The list is allocated before the handler awaits. Recording after that await
+    // mutates the same list; replacing the AsyncLocal value itself would not be
+    // visible to the caller.
+    private static readonly AsyncLocal<List<IntegrationEvent>?> Pending = new();
 
-    public static void Arm() => Pending.Value = null;
+    public static void Arm() => Pending.Value = [];
 
-    public static void Record(IntegrationEvent integrationEvent) => Pending.Value = integrationEvent;
+    public static void Record(IntegrationEvent integrationEvent) => Pending.Value?.Add(integrationEvent);
 
     public static string ToJson(JsonSerializerOptions options)
     {
-        var integrationEvent = Pending.Value;
+        var integrationEvent = Pending.Value?.LastOrDefault();
         Pending.Value = null;
         return integrationEvent switch
         {
