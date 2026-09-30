@@ -3,6 +3,7 @@
 using Aspire.Hosting;
 using Aspire.Hosting.ApplicationModel;
 
+using eShop.Catalog.API;
 using Microsoft.AspNetCore.Mvc.Testing;
 
 namespace eShop.Catalog.FunctionalTests;
@@ -33,7 +34,9 @@ public sealed class CatalogApiFixture : WebApplicationFactory<Program>, IAsyncLi
                 { $"ConnectionStrings:{Postgres.Resource.Name}", _postgresConnectionString },
                 });
         });
-        return base.CreateHost(builder);
+        var host = base.CreateHost(builder);
+        CatalogApi.Attach(host.Services);
+        return host;
     }
 
     public new async Task DisposeAsync()

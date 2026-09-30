@@ -1,5 +1,4 @@
-﻿// Graftcode catalog slice — CatalogService is a Gateway client, not an HttpClient.
-using eShop.Basket.API.Grpc;
+﻿// Graftcode catalog and basket slices — Gateway clients, not HTTP or gRPC.
 using eShop.WebApp.Services.OrderStatus.IntegrationEvents;
 using eShop.WebAppComponents.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
@@ -18,22 +17,15 @@ public static class Extensions
         builder.AddRabbitMqEventBus("EventBus")
                .AddEventBusSubscriptions();
 
-        builder.Services.AddHttpForwarderWithServiceDiscovery();
-
         // Application services
         builder.Services.AddScoped<BasketState>();
         builder.Services.AddScoped<LogOutService>();
-        builder.Services.AddSingleton<BasketService>();
+        builder.Services.AddScoped<BasketService>();
         builder.Services.AddSingleton<OrderStatusNotificationService>();
         builder.Services.AddSingleton<IProductImageUrlProvider, ProductImageUrlProvider>();
         builder.AddAIServices();
 
-        // HTTP and GRPC client registrations
-        builder.Services.AddGrpcClient<Basket.BasketClient>(o => o.Address = new("http://basket-api"))
-            .AddAuthToken();
-
-        // Catalog reads call CatalogGraft on Graftcode Gateway (CATALOG_GRAFT_HOST, default ws://localhost:8000/ws).
-        // Product images still use the legacy HTTP picture route.
+        // Catalog and basket calls go to Graftcode Gateway (default ws://localhost:8000/ws).
         builder.Services.AddScoped<CatalogService>();
         builder.Services.AddScoped<ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
 

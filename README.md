@@ -6,7 +6,7 @@ A reference .NET application implementing an e-commerce website using a services
 
 ![eShop homepage screenshot](img/eshop_homepage.png)
 
-This fork keeps the AdventureWorks services. The catalog slice the Blazor storefront reads (`Catalog.API` and `WebAppComponents` `CatalogService`) is a thin Graftcode facade: the same EF queries, called as public methods on `CatalogGraft` instead of REST URLs. Basket, ordering, identity, and payment are unchanged. See [Catalog on Graftcode](#catalog-on-graftcode).
+This fork keeps the AdventureWorks services. Catalog reads and basket updates from the Blazor storefront are in-place Graftcode facades: the original `CatalogApi` and `BasketService` methods, called through Graftcode Gateway instead of catalog REST and basket gRPC. Ordering, identity, and payment are unchanged. Fire-and-forget integration events still use the RabbitMQ event bus. See [Catalog and basket on Graftcode](#catalog-and-basket-on-graftcode).
 
 ## Getting Started
 
@@ -137,11 +137,17 @@ Use [`aspire publish`](https://aspire.dev/reference/cli/commands/aspire-publish/
 
 When you no longer need the deployment, run [`aspire destroy`](https://aspire.dev/reference/cli/commands/aspire-destroy/). This deletes the entire configured resource group, including resources that Aspire did not create, so review the target carefully before confirming.
 
-## Catalog on Graftcode
+## Catalog and basket on Graftcode
 
-Legacy HTTP routes in `CatalogApi.MapCatalogApi` are still mapped, so functional tests, OpenAPI, and the product-image proxy keep working. Each handler is a thin wrapper. The query and command bodies live on `CatalogGraft`, and the public methods are what Graftcode Gateway hosts. `CatalogService` is still `CatalogService` / `ICatalogService`. Its HTTP client calls are graft calls. `CATALOG_GRAFT_HOST` defaults to `ws://localhost:8000/ws`. The AppHost sets that variable on the web app.
+Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and deserializes the JSON strings. Return values are strings or primitives, not `object`.
 
-### In-place REST → Graft
+Basket followed the same pattern. `src/Basket.API/BasketService.cs` still talks to the Redis repository. `GetBasket`, `UpdateBasket`, and `DeleteBasket` are public static methods (buyer id and a JSON item list) instead of gRPC overrides. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
+
+Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (JSON with a MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
+
+`aspire run` still starts `catalog-api` and `basket-api`. Those processes migrate data and stay on the RabbitMQ event bus for fire-and-forget integration events (order stock, order status, `OrderStarted`). They are not the storefront's catalog or basket RPC path. A standalone Gateway process sets `EshopGraftHost` so it does not subscribe to that shared queue. A price change made through the gateway is not published onto the event bus.
+
+### In-place REST and gRPC → Graft
 
 `GetCatalogItem` no longer builds `api/catalog/items/{id}`:
 
@@ -150,44 +156,50 @@ Legacy HTTP routes in `CatalogApi.MapCatalogApi` are still mapped, so functional
 var uri = $"{remoteServiceBaseUrl}items/{id}";
 return httpClient.GetFromJsonAsync<CatalogItem>(uri);
 
-// after — same type, CatalogGraft.GetItem over the gateway
+// after — same CatalogService, CatalogApi.GetItem over the gateway
 return Task.FromResult(Parse<CatalogItem>(Call("GetItem", id)));
 ```
 
-`GetAllItems` no longer owns the EF query. It returns the page `CatalogGraft` already computed:
+The EF query stayed in `CatalogApi`:
 
 ```csharp
-var page = await CatalogGraft.ListItemsAsync(
-    services,
-    paginationRequest.PageIndex,
-    paginationRequest.PageSize,
-    name,
-    type,
-    brand);
-return TypedResults.Ok(page);
+public static string ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
+    Block(async services => ToJson(await ListItemsAsync(
+        services, pageIndex, pageSize, EmptyToNull(name), ParseIds(typeIds), ParseIds(brandIds))));
 ```
 
-The storefront calls `ListItems`, `GetItem`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, and `GetFacets`. Those methods return JSON strings. `CatalogService` deserializes them into the existing catalog records. Generic `object` results are not part of the surface. Create, update, delete, and picture bytes are on the same class for the gateway. The picture the browser shows is still the legacy route `GET /api/catalog/items/{id}/pic`, forwarded by the web app as `/product-images/{id}`.
+Basket updates no longer build a protobuf request:
+
+```csharp
+// before — WebApp/Services/BasketService.cs
+await basketClient.UpdateBasketAsync(updatePayload);
+
+// after — same BasketService, public method on eShop.Basket.API.BasketService
+Call("UpdateBasket", await BuyerIdAsync(), payload);
+```
 
 ### Why Graftcode
 
-Counted non-blank, non-comment lines on the path the storefront actually used.
+Counted non-blank, non-comment lines against `main`. These are not a percentage reduction. The route table and the gRPC surface went away. The gateway client and host glue added lines.
 
 | Piece | Before | After |
 | --- | ---: | ---: |
-| `MapCatalogApi` route table | 94 | not called by `CatalogService` (the 94 lines are still in the file for legacy HTTP) |
-| Public read methods on `CatalogGraft` | 0 | 22 |
-| `CatalogService` | 71 | 74 |
-| **Storefront path** | **165** | **96** |
+| `MapCatalogApi` route table | 95 | 0 |
+| `CatalogApi.cs` | 389 | 389 |
+| `CatalogService` | 71 | 123 |
+| `Catalog.API` `Program.cs` | 15 | 7 |
+| gRPC `Basket.API/Grpc/BasketService.cs` | 91 | 0 |
+| `Basket.API/BasketService.cs` | 0 | 150 |
+| Web app `BasketService` | 40 | 120 |
+| `basket.proto` | 24 | 0 |
 
-That path is **42%** smaller (165 → 96, (165 − 96) / 165). The client stopped assembling query strings and API versions, and the methods it calls are the contract.
+`CatalogApi.cs` is the same size because the 95-line route table was replaced by public method wrappers and the code that hosts them (DI, JSON, picture bytes). The EF queries did not move to another file. `CatalogService` grew from 71 to 123 lines, and the web app `BasketService` grew from 40 to 120, because each client opens a gateway connection and parses JSON. Together, `CatalogApi.cs` and `CatalogService` went from 460 to 512 non-blank lines.
 
-The rest of the diff is not a reduction, and it should not be folded into that percentage:
+Generated OpenAPI documents (`Catalog.API.json`, 1260 lines, and `Catalog.API_v2.json`, 1043 lines) and `Catalog.API.http` left with the route table. They were generated contracts, not the query logic.
 
-- `CatalogApi.cs` went from 389 to 262 non-blank lines. The EF bodies moved; they were not deleted. Those cores are 186 non-blank lines inside `CatalogGraft`.
-- Gateway host glue (process startup, JSON helpers, picture bytes) is 121 non-blank lines. `CatalogApi` + `CatalogGraft` + `CatalogService` together are 714 non-blank lines, up from 460 (**+55%**). The HTTP wrappers stayed so the existing catalog tests and the image proxy still compile and run.
+HTTP functional tests (`CatalogApiTests`, 345 non-blank lines, `WebApplicationFactory` and `/api/catalog/...`) are replaced by `CatalogMethodTests` (189), which call the public methods on the same Postgres test host. Basket unit tests call `GetBasket`, `UpdateBasket`, and `DeleteBasket` in memory against a mock repository.
 
-### Run the catalog gateway
+### WebSocket gateway (default)
 
 Install the Graftcode skill (it is not committed in this repo):
 
@@ -201,27 +213,30 @@ iwr grft.dev/get | iex
 curl -fsSL grft.dev/get | sh
 ```
 
-Install Graftcode Gateway, then a Postgres image that includes pgvector (the same image Aspire uses):
+Install Graftcode Gateway:
 
 ```bash
 curl -fsSL grft.dev/get/gg | sh
+```
 
+Catalog needs Postgres with pgvector (the image Aspire uses). Basket needs Redis. One `gg` process can host both assemblies on port 8000.
+
+```bash
 docker run -d --name eshop-catalog-pg \
   -e POSTGRES_PASSWORD=Pass@word \
   -e POSTGRES_DB=catalogdb \
   -p 5432:5432 ankane/pgvector
+docker run -d --name eshop-basket-redis -p 6379:6379 redis
 
 export ConnectionStrings__catalogdb="Host=localhost;Port=5432;Database=catalogdb;Username=postgres;Password=Pass@word"
-```
+export ConnectionStrings__redis="localhost:6379"
 
-Publish the existing catalog project and host `CatalogGraft`. The first call migrates and seeds `Setup/catalog.json`.
-
-```bash
 dotnet publish src/Catalog.API/Catalog.API.csproj -c Release -o ./artifacts/catalog-graft
+dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket-graft
 
 ./gg --runtime netcore \
-  --modules ./artifacts/catalog-graft/Catalog.API.dll \
-  --types eShop.Catalog.API.CatalogGraft \
+  --modules ./artifacts/catalog-graft/Catalog.API.dll,./artifacts/basket-graft/Basket.API.dll \
+  --types eShop.Catalog.API.CatalogApi,eShop.Basket.API.BasketService \
   --port 8000 \
   --corsAllowedOrigins "http://localhost:5045,https://localhost:7298"
 ```
@@ -229,11 +244,41 @@ dotnet publish src/Catalog.API/Catalog.API.csproj -c Release -o ./artifacts/cata
 - Graftcode Vision: http://localhost:8000
 - WebSocket: `ws://localhost:8000/ws`
 
-`CatalogService` runs inside the Blazor Server process, so the storefront does not need browser CORS for catalog reads. Pass `--corsAllowedOrigins` when a browser client calls the gateway from another origin (the web app's launch profile is `http://localhost:5045` and `https://localhost:7298`; add the Aspire dashboard origin if you open the store from there).
+The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets `CATALOG_GRAFT_HOST` and `BASKET_GRAFT_HOST` to `ws://localhost:8000/ws` on the web app. Start the gateway before opening the storefront.
 
-`aspire run` still starts the rest of the stack, including `catalog-api` for the picture proxy and for anything that was not part of this slice. Start the gateway before opening the storefront. Catalog list, search, brands, types, and facets come from `CatalogGraft`. Basket, ordering, identity, and payment are unchanged.
+`CatalogService` and `BasketService` run inside the Blazor Server process, so the storefront does not need browser CORS for these calls. Pass `--corsAllowedOrigins` when a browser client calls the gateway from another origin (the web app launch profile is `http://localhost:5045` and `https://localhost:7298`).
 
-The same public methods are MCP-ready: static methods, primitive arguments, string results. Copy the MCP client configuration from the Graftcode Vision portal. That portal is where the configuration is shown. Vision is the module graph, not the MCP endpoint.
+The same public methods are what an MCP client calls. Copy the MCP client configuration from the Graftcode Vision portal. Vision is the module graph, not the MCP endpoint.
+
+### RabbitMQ plugin
+
+[RabbitmqPlugin](https://github.com/grft-dev/graftcode-plugins/tree/main/rabbitmq) carries the same method calls over RabbitMQ request/reply instead of the websocket. Do not commit the plugin binary. Build it from that repo (`cmake -S . -B build && cmake --build build --config Release`). The output is `RabbitmqPlugin.dll` or `libRabbitmqPlugin.dll`. If the file has the `lib` prefix, set `"name"` to `libRabbitmqPlugin`. Put the DLL where `gg` loads plugins (next to the `gg` binary). Gateway releases are at [grft-dev/graftcode-gateway](https://github.com/grft-dev/graftcode-gateway/releases).
+
+Sample configs (guest/guest on localhost:5672):
+
+- `graft/pluginConfig.catalog.rabbitmq.json` — queues `eshop.catalog` and `eshop.catalog.reply`
+- `graft/pluginConfig.basket.rabbitmq.json` — queues `eshop.basket` and `eshop.basket.reply`
+
+Declare those queues before starting the gateway (RabbitMQ management UI, or `rabbitmqadmin declare queue`). One plugin config has one queue pair, so catalog and basket are two `gg` processes:
+
+```bash
+./gg ./artifacts/catalog-graft/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json
+./gg ./artifacts/basket-graft/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json
+```
+
+Point the web app at that transport (default remains websocket; this is opt-in):
+
+```bash
+export CATALOG_GRAFT_TRANSPORT=rabbitmq
+export BASKET_GRAFT_TRANSPORT=rabbitmq
+export CATALOG_GRAFT_PLUGIN_HOST=localhost:5672
+export BASKET_GRAFT_PLUGIN_HOST=localhost:5672
+# optional paths; otherwise the clients use the same JSON as the sample files
+export CATALOG_GRAFT_PLUGIN_CONFIG=$PWD/graft/pluginConfig.catalog.rabbitmq.json
+export BASKET_GRAFT_PLUGIN_CONFIG=$PWD/graft/pluginConfig.basket.rabbitmq.json
+```
+
+Aspire already starts a RabbitMQ container named `eventbus` for integration events. To run the plugin on that broker, copy its published host port, user, and password from the Aspire dashboard into the sample JSON and into `*_GRAFT_PLUGIN_HOST` (`host:port`). Aspire does not publish guest/guest on port 5672 unless you set that yourself. The event bus and the plugin are different uses of the same broker: order and stock events stay on the event bus; catalog and basket method calls use the plugin queues only when the transport variables are `rabbitmq`.
 
 ## Contributing
 

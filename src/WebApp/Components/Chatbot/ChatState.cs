@@ -1,4 +1,5 @@
-﻿using System.ComponentModel;
+﻿// Graftcode basket slice — unauthenticated basket writes are UnauthorizedAccessException, not gRPC status.
+using System.ComponentModel;
 using System.Security.Claims;
 using System.Text.Json;
 using eShop.WebAppComponents.Services;
@@ -142,7 +143,7 @@ public class ChatState
             await _basketState.AddAsync(item!);
             return "Item added to shopping cart.";
         }
-        catch (Grpc.Core.RpcException e) when (e.StatusCode == Grpc.Core.StatusCode.Unauthenticated)
+        catch (UnauthorizedAccessException)
         {
             return "Unable to add an item to the cart. You must be logged in.";
         }

@@ -6,11 +6,6 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.StackExchange.Redis" />
-    <PackageReference Include="Grpc.AspNetCore" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Protobuf Include="Proto\basket.proto" GrpcServices="Server" />
   </ItemGroup>
 
   <ItemGroup>
@@ -20,5 +15,6 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Basket.FunctionalTests" />
+    <InternalsVisibleTo Include="Basket.UnitTests" />
   </ItemGroup>
 </Project>

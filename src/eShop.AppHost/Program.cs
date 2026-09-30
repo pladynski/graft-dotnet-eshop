@@ -1,4 +1,4 @@
-﻿// Graftcode catalog slice — webapp catalog reads use Gateway, not catalog-api HTTP.
+﻿// Graftcode catalog and basket slices — webapp calls Gateway, not catalog HTTP or basket gRPC.
 using eShop.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);
@@ -61,7 +61,7 @@ var webHooksApi = builder.AddProject<Projects.Webhooks_API>("webhooks-api")
 // Reverse proxies
 builder.AddYarp("mobile-bff")
     .WithExternalHttpEndpoints()
-    .ConfigureMobileBffRoutes(catalogApi, orderingApi, identityApi);
+    .ConfigureMobileBffRoutes(orderingApi, identityApi);
 
 // Apps
 var webhooksClient = builder.AddProject<Projects.WebhookClient>("webhooksclient", launchProfileName)
@@ -77,7 +77,8 @@ var webApp = builder.AddProject<Projects.WebApp>("webapp", launchProfileName)
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WaitFor(identityApi)
     .WithEnvironment("IdentityUrl", identityEndpoint)
-    .WithEnvironment("CATALOG_GRAFT_HOST", "ws://localhost:8000/ws");
+    .WithEnvironment("CATALOG_GRAFT_HOST", "ws://localhost:8000/ws")
+    .WithEnvironment("BASKET_GRAFT_HOST", "ws://localhost:8000/ws");
 
 // Set UseFoundry=true to provision Microsoft Foundry for chat and embeddings.
 bool useFoundry = Extensions.IsFoundryEnabled(builder.Configuration);
