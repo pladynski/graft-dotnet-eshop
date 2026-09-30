@@ -346,7 +346,7 @@ The storefront websocket gateway on port 8000 can still host catalog and basket 
 
 Server configs are `graft/pluginConfig.*.rabbitmq.json` (`gg --config`). Client samples are `graft/graftConfig.*.json` (`GraftConfig.SetConfig`). Do not pass a server file to `SetConfig`. The integration processes build that client JSON from the environment variables above. `ESHOP_GRAFT_PLUGIN_NAME` defaults to `RabbitmqPlugin`. If the built library is `libRabbitmqPlugin.dll`, set the name to `libRabbitmqPlugin`.
 
-The `EventBus` and `EventBusRabbitMQ` projects are still in the tree. No service registers the bus.
+`EventBus` still holds `IntegrationEvent` and `IIntegrationEventHandler` for the outbox. `EventBusRabbitMQ` is gone. No service registers a bus.
 
 ## Contributing
 
