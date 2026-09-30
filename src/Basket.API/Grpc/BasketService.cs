@@ -1,4 +1,5 @@
-// Graftcode basket slice — gRPC overrides are public methods on BasketService.
+// Graftcode basket slice — original Grpc/BasketService. Redis logic stays here.
+// Public methods replace the gRPC overrides. There is no Basket.BasketBase.
 using System.Text.Json;
 using eShop.Basket.API.IntegrationEvents.EventHandling;
 using eShop.Basket.API.IntegrationEvents.EventHandling.Events;

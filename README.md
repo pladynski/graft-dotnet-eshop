@@ -141,7 +141,7 @@ When you no longer need the deployment, run [`aspire destroy`](https://aspire.de
 
 Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and deserializes the JSON strings. Return values are strings or primitives, not `object`.
 
-Basket followed the same pattern. `src/Basket.API/BasketService.cs` still talks to the Redis repository. `GetBasket`, `UpdateBasket`, and `DeleteBasket` are public static methods (buyer id and a JSON item list) instead of gRPC overrides. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
+Basket followed the same pattern, in the original file `src/Basket.API/Grpc/BasketService.cs`. That class still talks to the Redis repository. `GetBasket`, `UpdateBasket`, `DeleteBasket`, and `OnOrderStarted` are public static methods (buyer id and a JSON item list) instead of gRPC overrides. The type stays `eShop.Basket.API.BasketService`, which is what `gg --types` already hosts. There is no `Basket.BasketBase`. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
 
 Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (JSON with a MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
 
@@ -188,12 +188,11 @@ Counted non-blank, non-comment lines against `main`. The storefront calls genera
 | `CatalogApi.cs` | 389 | 419 |
 | `CatalogService` | 71 | 90 |
 | `Catalog.API` `Program.cs` | 15 | 7 |
-| gRPC `Basket.API/Grpc/BasketService.cs` | 91 | 0 |
-| `Basket.API/BasketService.cs` | 0 | 179 |
+| gRPC `Basket.API/Grpc/BasketService.cs` | 91 | 179 |
 | Web app `BasketService` | 40 | 92 |
 | `basket.proto` | 24 | 0 |
 
-`CatalogApi.cs` grew from 389 to 419 non-blank lines. The route table was replaced by public method wrappers, and order-stock handlers are now `OnOrderAwaitingValidation` and `OnOrderPaid` on the same class. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). Those clients only set `GraftConfig` and parse JSON. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 509 non-blank lines. `Basket.API/BasketService.cs` is 179 lines, including `OnOrderStarted`.
+`CatalogApi.cs` grew from 389 to 419 non-blank lines. The route table was replaced by public method wrappers, and order-stock handlers are now `OnOrderAwaitingValidation` and `OnOrderPaid` on the same class. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). Those clients only set `GraftConfig` and parse JSON. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 509 non-blank lines. `src/Basket.API/Grpc/BasketService.cs` is 179 non-blank lines, including `OnOrderStarted`. The hosted type is still `eShop.Basket.API.BasketService`.
 
 Generated OpenAPI documents (`Catalog.API.json`, 1260 lines, and `Catalog.API_v2.json`, 1043 lines) and `Catalog.API.http` left with the route table. They were generated contracts, not the query logic.
 
