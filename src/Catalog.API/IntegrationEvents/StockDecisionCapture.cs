@@ -1,6 +1,4 @@
 // Graftcode catalog slice — stock handlers still publish; the graft method returns that decision.
-using System.Text.Json;
-
 namespace eShop.Catalog.API.IntegrationEvents;
 
 internal static class StockDecisionCapture
@@ -14,21 +12,17 @@ internal static class StockDecisionCapture
 
     public static void Record(IntegrationEvent integrationEvent) => Pending.Value?.Add(integrationEvent);
 
-    public static string ToJson(JsonSerializerOptions options)
+    public static StockDecision Take()
     {
         var integrationEvent = Pending.Value?.LastOrDefault();
         Pending.Value = null;
         return integrationEvent switch
         {
-            OrderStockRejectedIntegrationEvent rejected => JsonSerializer.Serialize(
-                new Decision(
-                    "rejected",
-                    rejected.OrderStockItems.Where(item => !item.HasStock).Select(item => item.ProductId).ToArray()),
-                options),
-            OrderStockConfirmedIntegrationEvent => JsonSerializer.Serialize(new Decision("confirmed", []), options),
-            _ => JsonSerializer.Serialize(new Decision("none", []), options)
+            OrderStockRejectedIntegrationEvent rejected => new StockDecision(
+                "rejected",
+                rejected.OrderStockItems.Where(item => !item.HasStock).Select(item => item.ProductId).ToArray()),
+            OrderStockConfirmedIntegrationEvent => new StockDecision("confirmed", []),
+            _ => new StockDecision("none", [])
         };
     }
-
-    private sealed record Decision(string Result, int[] ProductIds);
 }

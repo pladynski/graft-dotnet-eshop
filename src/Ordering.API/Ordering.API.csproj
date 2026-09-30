@@ -26,7 +26,7 @@
 
   <ItemGroup>
     <PackageReference Include="graft.nuget.basket.api_4lefa6" />
-    <PackageReference Include="graft.nuget.catalog.api_063hpr" />
+    <PackageReference Include="graft.nuget.catalog.api_p0bvkj" />
     <PackageReference Include="graft.nuget.paymentprocessor_2hchbx" />
     <PackageReference Include="graft.nuget.webhooks.api_tu0l8p" />
     <PackageReference Include="Asp.Versioning.Http" />

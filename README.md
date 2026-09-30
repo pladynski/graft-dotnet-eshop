@@ -139,7 +139,7 @@ When you no longer need the deployment, run [`aspire destroy`](https://aspire.de
 
 ## Catalog and basket on Graftcode
 
-Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and deserializes the JSON strings. Return values are strings or primitives, not `object`.
+Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and deserializes the JSON strings. Return values are strings or primitives, not `object`. `OnOrderAwaitingValidation` is the exception: it takes a `StockRequest` record and returns a `StockDecision` record.
 
 Basket followed the same pattern, in the original file `src/Basket.API/Grpc/BasketService.cs`. That class still talks to the Redis repository. `GetBasket`, `UpdateBasket`, `DeleteBasket`, and `OnOrderStarted` are public static methods (buyer id and a JSON item list) instead of gRPC overrides. The type stays `eShop.Basket.API.BasketService`, which is what `gg --types` already hosts. There is no `Basket.BasketBase`. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
 
@@ -235,7 +235,7 @@ dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket
 
 ./gg --runtime netcore \
   --modules ./artifacts/catalog-graft/Catalog.API.dll,./artifacts/basket-graft/Basket.API.dll \
-  --types eShop.Catalog.API.CatalogApi,eShop.Basket.API.BasketService \
+  --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Basket.API.BasketService \
   --port 8000 \
   --corsAllowedOrigins "http://localhost:5045,https://localhost:7298"
 ```
@@ -250,7 +250,7 @@ The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets
 With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet, and copy the install command. The packages checked in for this slice were produced that way:
 
 ```bash
-dotnet add package graft.nuget.catalog.api_063hpr -v 1.0.0 --source https://grft.dev/45702aba-f4ff-47e5-9157-bf8096d331aa__free
+dotnet add package graft.nuget.catalog.api_p0bvkj -v 1.0.0 --source https://grft.dev/a6193fbf-2485-49b2-9a4a-e6b55bc6eaa4__free
 dotnet add package graft.nuget.basket.api_4lefa6 -v 1.0.0 --source https://grft.dev/1d322126-f16f-4b21-9e9f-454bff8f240e__free
 dotnet add package graft.nuget.ordering.api_kmowfv -v 1.0.0 --source https://grft.dev/6bdbab5c-e6f2-47ed-99c2-2e43ef4749ce__free
 dotnet add package graft.nuget.paymentprocessor_2hchbx -v 1.0.0 --source https://grft.dev/fe8171ea-ebec-4496-860e-a0a48111bd04__free
@@ -315,7 +315,7 @@ The storefront orders page (`OrdersRefreshOnStatusChange.razor`) polls every 5 s
 `Ordering.API` calls the basket, catalog, payment, and webhooks grafts. `Catalog.API` calls the webhooks graft for a price change. `OrderProcessor` calls `GracePeriodConfirmedIntegrationEventHandler.OnGracePeriodConfirmed`. Example:
 
 ```csharp
-CatalogGraft.OnOrderAwaitingValidation(orderId, stockItemsJson);
+CatalogGraft.OnOrderAwaitingValidation(orderId, new StockRequest(productIds, units));
 PaymentGraft.OnStockConfirmed(orderId);
 OrderingGraft.OnGracePeriodConfirmed(orderId);
 ```
@@ -335,7 +335,7 @@ export ConnectionStrings__redis="localhost:6379"
 export ConnectionStrings__orderingdb="Host=localhost;Port=5432;Database=orderingdb;Username=postgres;Password=..."
 export ConnectionStrings__webhooksdb="Host=localhost;Port=5432;Database=webhooksdb;Username=postgres;Password=..."
 
-./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi
+./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision
 ./gg /path/to/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json --types eShop.Basket.API.BasketService
 ./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockRejectedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentSucceededIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentFailedIntegrationEventHandler
 ./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler

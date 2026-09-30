@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using eShop.Graft;
+using StockDecision = graft.nuget.eShop.Catalog.API.StockDecision;
 
 namespace eShop.Ordering.API.Application.IntegrationEvents;
 
@@ -62,8 +63,8 @@ public class OrderingIntegrationEventService(
                 GraftCalls.OrderStarted(started.UserId);
                 break;
             case OrderStatusChangedToAwaitingValidationIntegrationEvent awaiting:
-                var decisionJson = GraftCalls.AwaitingValidation(awaiting.OrderId, StockJson(awaiting.OrderStockItems));
-                await ApplyStockDecisionAsync(awaiting.OrderId, decisionJson);
+                var decision = GraftCalls.AwaitingValidation(awaiting.OrderId, awaiting.OrderStockItems);
+                await ApplyStockDecisionAsync(awaiting.OrderId, decision);
                 break;
             case OrderStatusChangedToStockConfirmedIntegrationEvent confirmed:
                 var outcome = GraftCalls.Payment(confirmed.OrderId);
@@ -87,10 +88,13 @@ public class OrderingIntegrationEventService(
         }
     }
 
-    private async Task ApplyStockDecisionAsync(int orderId, string decisionJson)
+    private async Task ApplyStockDecisionAsync(int orderId, StockDecision decision)
     {
-        var decision = JsonSerializer.Deserialize<StockDecision>(decisionJson, JsonOptions)
-            ?? throw new InvalidOperationException("Catalog stock graft returned an empty decision.");
+        if (decision is null)
+        {
+            throw new InvalidOperationException("Catalog stock graft returned an empty decision.");
+        }
+
         await using var scope = _scopeFactory.CreateAsyncScope();
         if (string.Equals(decision.Result, "confirmed", StringComparison.OrdinalIgnoreCase))
         {
@@ -131,6 +135,5 @@ public class OrderingIntegrationEventService(
             (items ?? []).Select(item => new StockLine(item.ProductId, item.Units)),
             JsonOptions);
 
-    private sealed record StockDecision(string Result, int[] ProductIds);
     private sealed record StockLine(int ProductId, int Units);
 }

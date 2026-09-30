@@ -7,11 +7,11 @@ namespace eShop.Catalog.API;
 
 /// <summary>
 /// Catalog operations hosted by Graftcode Gateway.
-/// Public methods return JSON strings (or a primitive). There is no REST route table.
+/// Public methods return JSON strings or a primitive, except the stock decision, which is a record.
+/// There is no REST route table.
 /// </summary>
 public static class CatalogApi
-{
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+{    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
     private static IServiceProvider? AttachedServices;
 
@@ -96,12 +96,12 @@ public static class CatalogApi
             return ToJson(new PicturePayload(picture.Value.Mime, Convert.ToBase64String(bytes)));
         });
 
-    public static string OnOrderAwaitingValidation(int orderId, string stockItemsJson) =>
+    public static StockDecision OnOrderAwaitingValidation(int orderId, StockRequest stockItems) =>
         Block((provider, _) =>
         {
             var handler = ActivatorUtilities.CreateInstance<OrderStatusChangedToAwaitingValidationIntegrationEventHandler>(provider);
             StockDecisionCapture.Arm();
-            return AwaitDecision(handler, orderId, stockItemsJson);
+            return AwaitDecision(handler, orderId, stockItems);
         });
 
     public static string OnOrderPaid(int orderId, string stockItemsJson) =>
@@ -112,13 +112,27 @@ public static class CatalogApi
             return "{\"status\":\"ok\"}";
         });
 
-    private static async Task<string> AwaitDecision(
+    private static async Task<StockDecision> AwaitDecision(
         OrderStatusChangedToAwaitingValidationIntegrationEventHandler handler,
         int orderId,
-        string stockItemsJson)
+        StockRequest stockItems)
     {
-        await handler.Handle(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockItems(stockItemsJson))).ConfigureAwait(false);
-        return StockDecisionCapture.ToJson(JsonOptions);
+        await handler.Handle(new OrderStatusChangedToAwaitingValidationIntegrationEvent(orderId, ReadStockLines(stockItems))).ConfigureAwait(false);
+        return StockDecisionCapture.Take();
+    }
+
+    private static List<OrderStockItem> ReadStockLines(StockRequest stockItems)
+    {
+        var productIds = stockItems?.ProductIds ?? [];
+        var units = stockItems?.Units ?? [];
+        var count = Math.Min(productIds.Length, units.Length);
+        var items = new List<OrderStockItem>(count);
+        for (var i = 0; i < count; i++)
+        {
+            items.Add(new OrderStockItem(productIds[i], units[i]));
+        }
+
+        return items;
     }
 
     private static List<OrderStockItem> ReadStockItems(string stockItemsJson)
@@ -362,10 +376,10 @@ public static class CatalogApi
         public static MutationResult Created(int id) => new(StatusCodes.Status201Created, null, id);
     }
 
-    private static string Block(Func<CatalogServices, Task<string>> action) =>
+    private static T Block<T>(Func<CatalogServices, Task<T>> action) =>
         Block((_, services) => action(services));
 
-    private static string Block(Func<IServiceProvider, CatalogServices, Task<string>> action) =>
+    private static T Block<T>(Func<IServiceProvider, CatalogServices, Task<T>> action) =>
         Task.Run(async () =>
         {
             var provider = AttachedServices;
@@ -518,3 +532,7 @@ public static class CatalogApi
         public string EnvironmentName { get => inner.EnvironmentName; set => inner.EnvironmentName = value; }
     }
 }
+
+public sealed record StockRequest(int[] ProductIds, int[] Units);
+
+public sealed record StockDecision(string Result, int[] ProductIds);

@@ -2,6 +2,8 @@
 using eShop.Graft;
 using BasketGraft = graft.nuget.eShop.Basket.API.BasketService;
 using CatalogGraft = graft.nuget.eShop.Catalog.API.CatalogApi;
+using StockDecision = graft.nuget.eShop.Catalog.API.StockDecision;
+using StockRequest = graft.nuget.eShop.Catalog.API.StockRequest;
 using PaymentGraft = graft.nuget.eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler;
 using PaidWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToPaidIntegrationEventHandler;
 using ShippedWebhook = graft.nuget.Webhooks.API.IntegrationEvents.OrderStatusChangedToShippedIntegrationEventHandler;
@@ -19,10 +21,14 @@ internal static class GraftCalls
         BasketGraft.OnOrderStarted(userId ?? string.Empty);
     }
 
-    public static string AwaitingValidation(int orderId, string stockItemsJson)
+    public static StockDecision AwaitingValidation(int orderId, IEnumerable<OrderStockItem> items)
     {
         Ensure();
-        return CatalogGraft.OnOrderAwaitingValidation(orderId, stockItemsJson ?? string.Empty);
+        var lines = (items ?? []).ToArray();
+        var request = new StockRequest(
+            lines.Select(item => item.ProductId).ToArray(),
+            lines.Select(item => item.Units).ToArray());
+        return CatalogGraft.OnOrderAwaitingValidation(orderId, request);
     }
 
     public static string Payment(int orderId)
