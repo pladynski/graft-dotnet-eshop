@@ -1,9 +1,10 @@
-﻿using eShop.WebAppComponents.Services;
+﻿// Graftcode catalog slice — picture URL is the web app file endpoint, not catalog HTTP.
+using eShop.WebAppComponents.Services;
 
 namespace eShop.WebApp.Services;
 
 public class ProductImageUrlProvider : IProductImageUrlProvider
 {
     public string GetProductImageUrl(int productId)
-        => $"product-images/{productId}?api-version=2.0";
+        => $"product-images/{productId}";
 }

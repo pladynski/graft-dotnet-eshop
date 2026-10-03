@@ -6,29 +6,30 @@ public class OrderStatusChangedToAwaitingValidationIntegrationEventHandler(
     ILogger<OrderStatusChangedToAwaitingValidationIntegrationEventHandler> logger) :
     IIntegrationEventHandler<OrderStatusChangedToAwaitingValidationIntegrationEvent>
 {
-    public async Task Handle(OrderStatusChangedToAwaitingValidationIntegrationEvent @event)
+    public Task Handle(OrderStatusChangedToAwaitingValidationIntegrationEvent @event) =>
+        DecideAsync(@event);
+
+    internal async Task<StockDecision> DecideAsync(OrderStatusChangedToAwaitingValidationIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 
         var confirmedOrderStockItems = new List<ConfirmedOrderStockItem>();
-
         foreach (var orderStockItem in @event.OrderStockItems)
         {
             var catalogItem = catalogContext.CatalogItems.Find(orderStockItem.ProductId);
             if (catalogItem is not null)
             {
-                var hasStock = catalogItem.AvailableStock >= orderStockItem.Units;
-                var confirmedOrderStockItem = new ConfirmedOrderStockItem(catalogItem.Id, hasStock);
-
-                confirmedOrderStockItems.Add(confirmedOrderStockItem);
+                confirmedOrderStockItems.Add(new ConfirmedOrderStockItem(catalogItem.Id, catalogItem.AvailableStock >= orderStockItem.Units));
             }
         }
 
-        var confirmedIntegrationEvent = confirmedOrderStockItems.Any(c => !c.HasStock)
+        var missing = confirmedOrderStockItems.Where(item => !item.HasStock).Select(item => item.ProductId).ToArray();
+        var confirmedIntegrationEvent = missing.Length > 0
             ? (IntegrationEvent)new OrderStockRejectedIntegrationEvent(@event.OrderId, confirmedOrderStockItems)
             : new OrderStockConfirmedIntegrationEvent(@event.OrderId);
 
         await catalogIntegrationEventService.SaveEventAndCatalogContextChangesAsync(confirmedIntegrationEvent);
         await catalogIntegrationEventService.PublishThroughEventBusAsync(confirmedIntegrationEvent);
+        return missing.Length > 0 ? new StockDecision("rejected", missing) : new StockDecision("confirmed", []);
     }
 }

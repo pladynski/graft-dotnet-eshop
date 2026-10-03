@@ -2,10 +2,10 @@
 {
     public static void AddApplicationServices(this IHostApplicationBuilder builder)
     {
-        builder.AddDefaultAuthentication();
-
-        builder.AddRabbitMqEventBus("eventbus")
-               .AddEventBusSubscriptions();
+        if (!builder.Configuration.GetValue("EshopGraftHost", false))
+        {
+            builder.AddDefaultAuthentication();
+        }
 
         builder.AddNpgsqlDbContext<WebhooksContext>("webhooksdb");
 
@@ -14,12 +14,5 @@
         builder.Services.AddTransient<IGrantUrlTesterService, GrantUrlTesterService>();
         builder.Services.AddTransient<IWebhooksRetriever, WebhooksRetriever>();
         builder.Services.AddTransient<IWebhooksSender, WebhooksSender>();
-    }
-
-    private static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
-    {
-        eventBus.AddSubscription<ProductPriceChangedIntegrationEvent, ProductPriceChangedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToShippedIntegrationEvent, OrderStatusChangedToShippedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToPaidIntegrationEvent, OrderStatusChangedToPaidIntegrationEventHandler>();
     }
 }

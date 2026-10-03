@@ -9,6 +9,7 @@
   <ItemGroup>
     <Compile Include="..\Shared\ActivityExtensions.cs" Link="Extensions\ActivityExtensions.cs" />
     <Compile Include="..\Shared\MigrateDbContextExtensions.cs" Link="Extensions\MigrateDbContextExtensions.cs" />
+    <Compile Include="..\Shared\GraftRabbit.cs" Link="GraftRabbit.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -16,7 +17,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EventBusRabbitMQ\EventBusRabbitMQ.csproj" />
+    <ProjectReference Include="..\EventBus\EventBus.csproj" />
     <ProjectReference Include="..\IntegrationEventLogEF\IntegrationEventLogEF.csproj" />
     <ProjectReference Include="..\eShop.ServiceDefaults\eShop.ServiceDefaults.csproj" />
     <ProjectReference Include="..\Ordering.Domain\Ordering.Domain.csproj" />
@@ -24,6 +25,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="graft.nuget.basket.api_o573bl" />
+    <PackageReference Include="graft.nuget.catalog.api_2x9pc9" />
+    <PackageReference Include="graft.nuget.paymentprocessor_2hchbx" />
+    <PackageReference Include="graft.nuget.webhooks.api_lqs8sp" />
     <PackageReference Include="Asp.Versioning.Http" />
     <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="FluentValidation" />

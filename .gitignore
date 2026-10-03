@@ -201,6 +201,9 @@ PublishScripts/
 
 # NuGet Packages
 *.nupkg
+!graft/feed/*.nupkg
+# Local Graftcode Gateway cache (Binaries.zip). Do not commit.
+.graftcode/
 # NuGet Symbol Packages
 *.snupkg
 # The packages folder can be ignored because of Package Restore

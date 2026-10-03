@@ -1,12 +1,9 @@
-﻿using eShop.EventBus.Abstractions;
-using Microsoft.Extensions.Options;
-using eShop.OrderProcessor.Events;
+﻿using Microsoft.Extensions.Options;
 
 namespace eShop.OrderProcessor.Services
 {
     public class GracePeriodManagerService(
         IOptions<BackgroundTaskOptions> options,
-        IEventBus eventBus,
         ILogger<GracePeriodManagerService> logger,
         IGracePeriodOrdersRepository repository) : BackgroundService
     {
@@ -53,11 +50,9 @@ namespace eShop.OrderProcessor.Services
 
             foreach (var orderId in orderIds)
             {
-                var confirmGracePeriodEvent = new GracePeriodConfirmedIntegrationEvent(orderId);
+                logger.LogInformation("Confirming grace period for order {OrderId}", orderId);
 
-                logger.LogInformation("Publishing integration event: {IntegrationEventId} - ({@IntegrationEvent})", confirmGracePeriodEvent.Id, confirmGracePeriodEvent);
-
-                await eventBus.PublishAsync(confirmGracePeriodEvent);
+                OrderingLifecycle.GracePeriodConfirmed(orderId);
             }
         }
 

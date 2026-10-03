@@ -10,9 +10,25 @@ public class IntegrationEventLogService<TContext> : IIntegrationEventLogService,
     public IntegrationEventLogService(TContext context)
     {
         _context = context;
-        _eventTypes = Assembly.Load(Assembly.GetEntryAssembly().FullName)
-            .GetTypes()
+        var entry = Assembly.GetEntryAssembly();
+        // Gateway hosts the module, so there is no entry assembly to scan.
+        var assemblies = entry is not null
+            ? new[] { Assembly.Load(entry.FullName) }
+            : AppDomain.CurrentDomain.GetAssemblies().Where(a => !a.IsDynamic).ToArray();
+        _eventTypes = assemblies
+            .SelectMany(static assembly =>
+            {
+                try
+                {
+                    return assembly.GetTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    return ex.Types.Where(t => t != null);
+                }
+            })
             .Where(t => t.Name.EndsWith(nameof(IntegrationEvent)))
+            .Distinct()
             .ToArray();
     }
 

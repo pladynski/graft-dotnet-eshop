@@ -1,4 +1,6 @@
-﻿using eShop.AppHost;
+﻿// Graftcode catalog and basket slices — webapp calls Gateway, not catalog HTTP or basket gRPC.
+// Order integration uses RabbitmqPlugin (ESHOP_GRAFT_TRANSPORT), not the Aspire event bus.
+using eShop.AppHost;
 
 var builder = DistributedApplication.CreateBuilder(args);
 
@@ -36,18 +38,24 @@ redis.WithParentRelationship(basketApi);
 
 var catalogApi = builder.AddProject<Projects.Catalog_API>("catalog-api")
     .WithReference(rabbitMq).WaitFor(rabbitMq)
-    .WithReference(catalogDb);
+    .WithReference(catalogDb)
+    .WithEnvironment("ESHOP_GRAFT_TRANSPORT", "rabbitmq")
+    .WithEnvironment("ESHOP_GRAFT_PLUGIN_HOST", "localhost:5672");
 
 var orderingApi = builder.AddProject<Projects.Ordering_API>("ordering-api")
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WithReference(orderDb).WaitFor(orderDb)
     .WithHttpHealthCheck("/health")
-    .WithEnvironment("Identity__Url", identityEndpoint);
+    .WithEnvironment("Identity__Url", identityEndpoint)
+    .WithEnvironment("ESHOP_GRAFT_TRANSPORT", "rabbitmq")
+    .WithEnvironment("ESHOP_GRAFT_PLUGIN_HOST", "localhost:5672");
 
 builder.AddProject<Projects.OrderProcessor>("order-processor")
     .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WithReference(orderDb)
-    .WaitFor(orderingApi); // wait for the orderingApi to be ready because that contains the EF migrations
+    .WaitFor(orderingApi) // wait for the orderingApi to be ready because that contains the EF migrations
+    .WithEnvironment("ESHOP_GRAFT_TRANSPORT", "rabbitmq")
+    .WithEnvironment("ESHOP_GRAFT_PLUGIN_HOST", "localhost:5672");
 
 builder.AddProject<Projects.PaymentProcessor>("payment-processor")
     .WithReference(rabbitMq).WaitFor(rabbitMq);
@@ -60,7 +68,7 @@ var webHooksApi = builder.AddProject<Projects.Webhooks_API>("webhooks-api")
 // Reverse proxies
 builder.AddYarp("mobile-bff")
     .WithExternalHttpEndpoints()
-    .ConfigureMobileBffRoutes(catalogApi, orderingApi, identityApi);
+    .ConfigureMobileBffRoutes(orderingApi, identityApi);
 
 // Apps
 var webhooksClient = builder.AddProject<Projects.WebhookClient>("webhooksclient", launchProfileName)
@@ -73,9 +81,10 @@ var webApp = builder.AddProject<Projects.WebApp>("webapp", launchProfileName)
     .WithReference(basketApi)
     .WithReference(catalogApi)
     .WithReference(orderingApi)
-    .WithReference(rabbitMq).WaitFor(rabbitMq)
     .WaitFor(identityApi)
-    .WithEnvironment("IdentityUrl", identityEndpoint);
+    .WithEnvironment("IdentityUrl", identityEndpoint)
+    .WithEnvironment("CATALOG_GRAFT_HOST", "ws://localhost:8000/ws")
+    .WithEnvironment("BASKET_GRAFT_HOST", "ws://localhost:8000/ws");
 
 // Set UseFoundry=true to provision Microsoft Foundry for chat and embeddings.
 bool useFoundry = Extensions.IsFoundryEnabled(builder.Configuration);

@@ -1,4 +1,5 @@
-﻿using eShop.Catalog.API.Services;
+﻿// Graftcode catalog slice — order stock is a graft method, not a Rabbit consumer.
+using eShop.Catalog.API.Services;
 
 public static class Extensions
 {
@@ -27,10 +28,6 @@ public static class Extensions
         builder.Services.AddTransient<IIntegrationEventLogService, IntegrationEventLogService<CatalogContext>>();
 
         builder.Services.AddTransient<ICatalogIntegrationEventService, CatalogIntegrationEventService>();
-
-        builder.AddRabbitMqEventBus("eventbus")
-               .AddSubscription<OrderStatusChangedToAwaitingValidationIntegrationEvent, OrderStatusChangedToAwaitingValidationIntegrationEventHandler>()
-               .AddSubscription<OrderStatusChangedToPaidIntegrationEvent, OrderStatusChangedToPaidIntegrationEventHandler>();
 
         builder.Services.AddOptions<CatalogOptions>()
             .BindConfiguration(nameof(CatalogOptions));

@@ -1,5 +1,4 @@
-﻿using eShop.Basket.API.Grpc;
-using eShop.WebApp.Services.OrderStatus.IntegrationEvents;
+﻿// Graftcode catalog and basket slices — Gateway clients, not HTTP or gRPC.
 using eShop.WebAppComponents.Services;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
@@ -14,40 +13,21 @@ public static class Extensions
     {
         builder.AddAuthenticationServices();
 
-        builder.AddRabbitMqEventBus("EventBus")
-               .AddEventBusSubscriptions();
-
-        builder.Services.AddHttpForwarderWithServiceDiscovery();
-
         // Application services
+        builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<BasketState>();
         builder.Services.AddScoped<LogOutService>();
-        builder.Services.AddSingleton<BasketService>();
-        builder.Services.AddSingleton<OrderStatusNotificationService>();
+        builder.Services.AddScoped<BasketService>();
         builder.Services.AddSingleton<IProductImageUrlProvider, ProductImageUrlProvider>();
         builder.AddAIServices();
 
-        // HTTP and GRPC client registrations
-        builder.Services.AddGrpcClient<Basket.BasketClient>(o => o.Address = new("http://basket-api"))
-            .AddAuthToken();
-
-        builder.Services.AddHttpClient<CatalogService>(o => o.BaseAddress = new("https+http://catalog-api"))
-            .AddApiVersion(2.0)
-            .AddAuthToken();
+        // Catalog and basket calls go to Graftcode Gateway (default ws://localhost:8000/ws).
+        builder.Services.AddScoped<CatalogService>();
+        builder.Services.AddScoped<ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
 
         builder.Services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("https+http://ordering-api"))
             .AddApiVersion(1.0)
             .AddAuthToken();
-    }
-
-    public static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
-    {
-        eventBus.AddSubscription<OrderStatusChangedToAwaitingValidationIntegrationEvent, OrderStatusChangedToAwaitingValidationIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToPaidIntegrationEvent, OrderStatusChangedToPaidIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToStockConfirmedIntegrationEvent, OrderStatusChangedToStockConfirmedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToShippedIntegrationEvent, OrderStatusChangedToShippedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToCancelledIntegrationEvent, OrderStatusChangedToCancelledIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStatusChangedToSubmittedIntegrationEvent, OrderStatusChangedToSubmittedIntegrationEventHandler>();
     }
 
     public static void AddAuthenticationServices(this IHostApplicationBuilder builder)
