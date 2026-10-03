@@ -1,9 +1,11 @@
 // Graftcode basket slice — original Grpc/BasketService. Redis logic stays here.
 // Public methods replace the gRPC overrides. There is no Basket.BasketBase.
+// The caller is the verified JWT on this invocation, read from Graftcode.Context before any thread hop.
 using eShop.Basket.API.IntegrationEvents.EventHandling;
 using eShop.Basket.API.IntegrationEvents.EventHandling.Events;
 using eShop.Basket.API.Model;
 using eShop.Basket.API.Repositories;
+using Graftcode.Context;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace eShop.Basket.API;
@@ -34,33 +36,75 @@ public class BasketService
         return new AttachScope();
     }
 
-    public static BasketResult GetBasket(string buyerId) =>
-        Locked(() => Block(service => service.Read(buyerId)));
-
-    public static BasketResult UpdateBasket(string buyerId, int[] productIds, int[] quantities) =>
-        Locked(() => Block(service => service.Replace(buyerId, productIds, quantities)));
-
-    public static BasketResult DeleteBasket(string buyerId) =>
-        Locked(() => Block(service => service.Remove(buyerId)));
-
-    public static BasketResult OnOrderStarted(string buyerId) =>
-        Locked(() => Task.Run(async () =>
+    public static BasketResult GetBasket()
+    {
+        var authorization = CurrentAuthorization();
+        return Locked(() => Run(async provider =>
         {
-            var provider = AttachedServices;
-            if (provider is null)
+            var caller = await AuthorizeAsync(provider, authorization, serviceOperation: false).ConfigureAwait(false);
+            if (!caller.IsUser)
             {
-                var host = await HostTask.Value.ConfigureAwait(false);
-                provider = host.Services;
+                return caller.IsAnonymous ? Lines(null) : Status(caller.Failure ?? "unauthenticated");
             }
 
-            await using var scope = provider.CreateAsyncScope();
-            var repository = scope.ServiceProvider.GetRequiredService<IBasketRepository>();
-            var logger = scope.ServiceProvider.GetService<ILogger<OrderStartedIntegrationEventHandler>>()
+            return await Create(provider).Read(caller.Subject).ConfigureAwait(false);
+        }));
+    }
+
+    public static BasketResult UpdateBasket(int[] productIds, int[] quantities)
+    {
+        var authorization = CurrentAuthorization();
+        return Locked(() => Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization, serviceOperation: false).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return Status("unauthenticated");
+            }
+
+            return await Create(provider).Replace(caller.Subject, productIds, quantities).ConfigureAwait(false);
+        }));
+    }
+
+    public static BasketResult DeleteBasket()
+    {
+        var authorization = CurrentAuthorization();
+        return Locked(() => Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization, serviceOperation: false).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return Status("unauthenticated");
+            }
+
+            return await Create(provider).Remove(caller.Subject).ConfigureAwait(false);
+        }));
+    }
+
+    public static BasketResult OnOrderStarted(string buyerId)
+    {
+        var authorization = CurrentAuthorization();
+        return Locked(() => Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization, serviceOperation: true).ConfigureAwait(false);
+            if (!caller.IsService)
+            {
+                return Status(caller.Failure ?? "forbidden");
+            }
+
+            if (string.IsNullOrEmpty(buyerId))
+            {
+                return Status("unauthenticated");
+            }
+
+            var repository = provider.GetRequiredService<IBasketRepository>();
+            var logger = provider.GetService<ILogger<OrderStartedIntegrationEventHandler>>()
                 ?? NullLogger<OrderStartedIntegrationEventHandler>.Instance;
             var handler = new OrderStartedIntegrationEventHandler(repository, logger);
-            await handler.Handle(new OrderStartedIntegrationEvent(buyerId ?? string.Empty)).ConfigureAwait(false);
+            await handler.Handle(new OrderStartedIntegrationEvent(buyerId)).ConfigureAwait(false);
             return Status("deleted");
-        }).GetAwaiter().GetResult());
+        }));
+    }
 
     public static int HostPid() => Environment.ProcessId;
 
@@ -149,7 +193,43 @@ public class BasketService
         }
     }
 
-    private static T Block<T>(Func<BasketService, Task<T>> action) =>
+    // RequestContext.Current is thread-static. Read it on the graft entry thread, before Task.Run.
+    private static string CurrentAuthorization()
+    {
+        var current = RequestContext.Current;
+        if (current is null)
+        {
+            return null;
+        }
+
+        var headers = current.GetHeaders();
+        if (headers is null)
+        {
+            return null;
+        }
+
+        if (headers.TryGetValue("authorization", out var value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        if (headers.TryGetValue("Authorization", out value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private static Task<BasketCaller> AuthorizeAsync(IServiceProvider provider, string authorization, bool serviceOperation) =>
+        BasketTokens.ValidateAsync(provider.GetRequiredService<IConfiguration>(), authorization, serviceOperation);
+
+    private static BasketService Create(IServiceProvider provider) =>
+        new(
+            provider.GetRequiredService<IBasketRepository>(),
+            provider.GetRequiredService<ILogger<BasketService>>());
+
+    private static T Run<T>(Func<IServiceProvider, Task<T>> action) =>
         Task.Run(async () =>
         {
             var provider = AttachedServices;
@@ -160,10 +240,7 @@ public class BasketService
             }
 
             await using var scope = provider.CreateAsyncScope();
-            var service = new BasketService(
-                scope.ServiceProvider.GetRequiredService<IBasketRepository>(),
-                scope.ServiceProvider.GetRequiredService<ILogger<BasketService>>());
-            return await action(service).ConfigureAwait(false);
+            return await action(scope.ServiceProvider).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
 
     private static async Task<IHost> StartHostAsync()

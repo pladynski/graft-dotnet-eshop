@@ -21,6 +21,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Basket.UnitTests/Basket.UnitTests.csproj" />
+    <Project Path="tests/Basket.GraftTests/Basket.GraftTests.csproj" />
     <Project Path="tests/Basket.FunctionalTests/Basket.FunctionalTests.csproj" />
     <Project Path="tests/Application.UnitTests/Application.UnitTests.csproj" />
     <Project Path="tests/Catalog.FunctionalTests/Catalog.FunctionalTests.csproj" />

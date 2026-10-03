@@ -19,7 +19,17 @@ internal static class GraftCalls
     public static void OrderStarted(string userId)
     {
         Ensure();
-        BasketGraft.OnOrderStarted(userId ?? string.Empty);
+        var headers = new Dictionary<string, string>
+        {
+            ["Authorization"] = "Bearer " + OrderingBasketToken.Get()
+        };
+        var result = graft.nuget.Basket.API.GraftConfig.InvokeWithHeaders(
+            () => BasketGraft.OnOrderStarted(userId ?? string.Empty),
+            headers);
+        if (result is null || !string.Equals(result.Status, "deleted", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Basket OnOrderStarted was rejected.");
+        }
     }
 
     public static StockDecision AwaitingValidation(int orderId, IEnumerable<OrderStockItem> items)

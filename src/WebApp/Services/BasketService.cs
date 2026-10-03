@@ -1,12 +1,14 @@
 ﻿// Graftcode basket slice — same BasketService, calls the generated Basket graft.
+// The access token is the one OpenIdConnect saved (SaveTokens), the same token AddAuthToken sends.
+// InvokeWithHeaders binds it to this call. It is not stored in GraftConfig.SetHeaders.
 using graft.nuget.Basket.API;
-using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Authentication;
 using BasketApi = graft.nuget.eShop.Basket.API.BasketService;
 using BasketResult = graft.nuget.eShop.Basket.API.BasketResult;
 
 namespace eShop.WebApp.Services;
 
-public class BasketService(AuthenticationStateProvider authenticationStateProvider)
+public class BasketService(IHttpContextAccessor httpContextAccessor)
 {
     public const string DefaultHost = "ws://localhost:8000/ws";
 
@@ -27,22 +29,38 @@ public class BasketService(AuthenticationStateProvider authenticationStateProvid
 
     public async Task<IReadOnlyCollection<BasketQuantity>> GetBasketAsync()
     {
-        var result = BasketApi.GetBasket(await BuyerIdAsync());
+        var result = await InvokeAsync(() => BasketApi.GetBasket());
+        ThrowIfUnauthenticated(result);
         return Lines(result);
     }
 
     public async Task DeleteBasketAsync()
     {
-        ThrowIfUnauthenticated(BasketApi.DeleteBasket(await BuyerIdAsync()));
+        ThrowIfUnauthenticated(await InvokeAsync(() => BasketApi.DeleteBasket()));
     }
 
     public async Task UpdateBasketAsync(IReadOnlyCollection<BasketQuantity> basket)
     {
         var lines = basket ?? [];
-        ThrowIfUnauthenticated(BasketApi.UpdateBasket(
-            await BuyerIdAsync(),
+        ThrowIfUnauthenticated(await InvokeAsync(() => BasketApi.UpdateBasket(
             lines.Select(item => item.ProductId).ToArray(),
-            lines.Select(item => item.Quantity).ToArray()));
+            lines.Select(item => item.Quantity).ToArray())));
+    }
+
+    private async Task<BasketResult> InvokeAsync(Func<BasketResult> call)
+    {
+        var headers = new Dictionary<string, string>();
+        var context = httpContextAccessor.HttpContext;
+        if (context is not null)
+        {
+            var accessToken = await context.GetTokenAsync("access_token");
+            if (!string.IsNullOrEmpty(accessToken))
+            {
+                headers["Authorization"] = "Bearer " + accessToken;
+            }
+        }
+
+        return GraftConfig.InvokeWithHeaders(call, headers);
     }
 
     private static IReadOnlyCollection<BasketQuantity> Lines(BasketResult result)
@@ -75,12 +93,6 @@ public class BasketService(AuthenticationStateProvider authenticationStateProvid
         {
             throw new UnauthorizedAccessException("You must be logged in.");
         }
-    }
-
-    private async Task<string> BuyerIdAsync()
-    {
-        var user = (await authenticationStateProvider.GetAuthenticationStateAsync()).User;
-        return user.FindFirst("sub")?.Value ?? string.Empty;
     }
 
     private static string ReadPluginConfig()

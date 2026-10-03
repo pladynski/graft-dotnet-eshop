@@ -93,6 +93,7 @@
     <PackageVersion Include="Scalar.AspNetCore" Version="2.8.6" />
     <!-- Before license change -->
     <PackageVersion Include="MediatR" Version="13.0.0" />
+    <PackageVersion Include="Graftcode.Context" Version="1.0.3" />
     <PackageVersion Include="graft.nuget.catalog.api_2x9pc9" Version="1.0.0" />
     <PackageVersion Include="graft.nuget.basket.api_o573bl" Version="1.0.0" />
     <PackageVersion Include="graft.nuget.ordering.api_aro1yz" Version="1.0.0" />

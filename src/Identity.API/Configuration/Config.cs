@@ -8,7 +8,10 @@
             return new List<ApiResource>
             {
                 new ApiResource("orders", "Orders Service"),
-                new ApiResource("basket", "Basket Service"),
+                new ApiResource("basket", "Basket Service")
+                {
+                    Scopes = { "basket", "basket.internal" }
+                },
                 new ApiResource("webhooks", "Webhooks registration Service"),
             };
         }
@@ -21,6 +24,7 @@
             {
                 new ApiScope("orders", "Orders Service"),
                 new ApiScope("basket", "Basket Service"),
+                new ApiScope("basket.internal", "Basket operations for the Ordering service"),
                 new ApiScope("webhooks", "Webhooks registration Service"),
             };
         }
@@ -140,6 +144,14 @@
                     },
                     AccessTokenLifetime = 60*60*2, // 2 hours
                     IdentityTokenLifetime= 60*60*2 // 2 hours
+                },
+                new Client
+                {
+                    ClientId = "ordering",
+                    ClientName = "Ordering Service",
+                    AllowedGrantTypes = GrantTypes.ClientCredentials,
+                    ClientSecrets = { new Secret("secret".Sha256()) },
+                    AllowedScopes = { "basket.internal" }
                 },
                 new Client
                 {

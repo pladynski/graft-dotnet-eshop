@@ -14,6 +14,7 @@ public static class Extensions
         builder.AddAuthenticationServices();
 
         // Application services
+        builder.Services.AddHttpContextAccessor();
         builder.Services.AddScoped<BasketState>();
         builder.Services.AddScoped<LogOutService>();
         builder.Services.AddScoped<BasketService>();
