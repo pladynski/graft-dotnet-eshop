@@ -7,8 +7,9 @@ namespace eShop.Catalog.API;
 
 /// <summary>
 /// Catalog operations hosted by Graftcode Gateway.
-/// Storefront reads still return JSON strings. Stock and paid orders use records.
-/// There is no REST route table.
+/// Storefront reads return classes. A page's Items is CatalogItemView[].
+/// Callers skip an array when its count is 0; an empty complex array does not round-trip.
+/// Create, update, and delete still use JSON. There is no REST route table.
 /// </summary>
 public static class CatalogApi
 {    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -20,13 +21,22 @@ public static class CatalogApi
 
     public static int HostPid() => Environment.ProcessId;
 
-    public static string GetItem(int id) =>
-        Block(async services => id <= 0
-            ? "null"
-            : ToJson(await FindItemAsync(services, id).ConfigureAwait(false)));
+    public static CatalogItemHit GetItem(int id) =>
+        Block(async services =>
+        {
+            if (id <= 0)
+            {
+                return new CatalogItemHit { Found = 0 };
+            }
 
-    public static string ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
-        Block(async services => ToJson(await ListItemsAsync(
+            var item = await FindItemAsync(services, id).ConfigureAwait(false);
+            return item is null
+                ? new CatalogItemHit { Found = 0 }
+                : new CatalogItemHit { Found = 1, Item = ToView(item) };
+        });
+
+    public static CatalogPage ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
+        Block(async services => ToPage(await ListItemsAsync(
             services,
             pageIndex,
             pageSize,
@@ -34,20 +44,20 @@ public static class CatalogApi
             ParseIds(typeIds),
             ParseIds(brandIds)).ConfigureAwait(false)));
 
-    public static string GetItemsByIds(string ids) =>
-        Block(async services => ToJson(await FindItemsByIdsAsync(services, ParseIds(ids) ?? []).ConfigureAwait(false)));
+    public static CatalogItemSet GetItemsByIds(string ids) =>
+        Block(async services => ToSet(await FindItemsByIdsAsync(services, ParseIds(ids) ?? []).ConfigureAwait(false)));
 
-    public static string Search(int pageIndex, int pageSize, string text) =>
-        Block(async services => ToJson(await SearchAsync(services, pageIndex, pageSize, text ?? string.Empty).ConfigureAwait(false)));
+    public static CatalogPage Search(int pageIndex, int pageSize, string text) =>
+        Block(async services => ToPage(await SearchAsync(services, pageIndex, pageSize, text ?? string.Empty).ConfigureAwait(false)));
 
-    public static string ListBrands() =>
-        Block(async services => ToJson(await ListBrandsAsync(services.Context).ConfigureAwait(false)));
+    public static CatalogBrandList ListBrands() =>
+        Block(async services => ToBrandList(await ListBrandsAsync(services.Context).ConfigureAwait(false)));
 
-    public static string ListTypes() =>
-        Block(async services => ToJson(await ListTypesAsync(services.Context).ConfigureAwait(false)));
+    public static CatalogTypeList ListTypes() =>
+        Block(async services => ToTypeList(await ListTypesAsync(services.Context).ConfigureAwait(false)));
 
-    public static string GetFacets(string typeIds, string brandIds) =>
-        Block(async services => ToJson(await GetFacetsAsync(services, ParseIds(typeIds), ParseIds(brandIds)).ConfigureAwait(false)));
+    public static CatalogFacetSet GetFacets(string typeIds, string brandIds) =>
+        Block(async services => ToFacetSet(await GetFacetsAsync(services, ParseIds(typeIds), ParseIds(brandIds)).ConfigureAwait(false)));
 
     public static string CreateItem(string itemJson) =>
         Block(async services =>
@@ -82,18 +92,23 @@ public static class CatalogApi
         Block(async services => ToJson(new StatusPayload(
             await DeleteItemAsync(services, id).ConfigureAwait(false) ? "deleted" : "notFound")));
 
-    public static string GetItemPicture(int id) =>
+    public static CatalogPicture GetItemPicture(int id) =>
         Block(async (provider, services) =>
         {
             var root = provider.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
             var picture = await TryGetPictureAsync(services.Context, root, id).ConfigureAwait(false);
             if (picture is null || !File.Exists(picture.Value.Path))
             {
-                return "null";
+                return new CatalogPicture { Found = 0 };
             }
 
             var bytes = await File.ReadAllBytesAsync(picture.Value.Path).ConfigureAwait(false);
-            return ToJson(new PicturePayload(picture.Value.Mime, Convert.ToBase64String(bytes)));
+            return new CatalogPicture
+            {
+                Found = 1,
+                Mime = picture.Value.Mime,
+                Base64 = Convert.ToBase64String(bytes)
+            };
         });
 
     public static StockDecision OnOrderAwaitingValidation(int orderId, StockRequest stockItems) =>
@@ -152,6 +167,7 @@ public static class CatalogApi
 
         var itemsOnPage = await root
             .Include(ci => ci.CatalogBrand)
+            .Include(ci => ci.CatalogType)
             .OrderBy(c => c.Name)
             .Skip(pageSize * pageIndex)
             .Take(pageSize)
@@ -202,11 +218,18 @@ public static class CatalogApi
             return [];
         }
 
-        return await services.Context.CatalogItems.Where(item => ids.Contains(item.Id)).ToListAsync();
+        return await services.Context.CatalogItems
+            .Include(item => item.CatalogBrand)
+            .Include(item => item.CatalogType)
+            .Where(item => ids.Contains(item.Id))
+            .ToListAsync();
     }
 
     internal static async Task<CatalogItem?> FindItemAsync(CatalogServices services, int id) =>
-        await services.Context.CatalogItems.Include(ci => ci.CatalogBrand).SingleOrDefaultAsync(ci => ci.Id == id);
+        await services.Context.CatalogItems
+            .Include(ci => ci.CatalogBrand)
+            .Include(ci => ci.CatalogType)
+            .SingleOrDefaultAsync(ci => ci.Id == id);
 
     internal static Task<List<CatalogType>> ListTypesAsync(CatalogContext context) =>
         context.CatalogTypes.OrderBy(x => x.Type).ToListAsync();
@@ -253,6 +276,8 @@ public static class CatalogApi
         if (services.Logger.IsEnabled(LogLevel.Debug))
         {
             var itemsWithDistance = await services.Context.CatalogItems
+                .Include(c => c.CatalogBrand)
+                .Include(c => c.CatalogType)
                 .Where(c => c.Embedding != null)
                 .Select(c => new { Item = c, Distance = c.Embedding!.CosineDistance(vector) })
                 .OrderBy(c => c.Distance)
@@ -267,6 +292,8 @@ public static class CatalogApi
         else
         {
             itemsOnPage = await services.Context.CatalogItems
+                .Include(c => c.CatalogBrand)
+                .Include(c => c.CatalogType)
                 .Where(c => c.Embedding != null)
                 .OrderBy(c => c.Embedding!.CosineDistance(vector))
                 .Skip(pageSize * pageIndex)
@@ -430,6 +457,85 @@ public static class CatalogApi
         return baseDir;
     }
 
+    private static CatalogItemView ToView(CatalogItem item) => new()
+    {
+        Id = item.Id,
+        Name = item.Name ?? string.Empty,
+        Description = item.Description ?? string.Empty,
+        Price = (double)item.Price,
+        PictureFileName = item.PictureFileName ?? string.Empty,
+        CatalogBrandId = item.CatalogBrandId,
+        CatalogTypeId = item.CatalogTypeId,
+        AvailableStock = item.AvailableStock,
+        RestockThreshold = item.RestockThreshold,
+        MaxStockThreshold = item.MaxStockThreshold,
+        Brand = new CatalogBrandView
+        {
+            Id = item.CatalogBrandId,
+            Brand = item.CatalogBrand?.Brand ?? string.Empty
+        },
+        Type = new CatalogTypeView
+        {
+            Id = item.CatalogTypeId,
+            Type = item.CatalogType?.Type ?? string.Empty
+        }
+    };
+
+    private static CatalogPage ToPage(PaginatedItems<CatalogItem> page)
+    {
+        var items = page.Data.Select(ToView).ToArray();
+        var total = page.Count > int.MaxValue ? int.MaxValue : (int)page.Count;
+        return new CatalogPage
+        {
+            PageIndex = page.PageIndex,
+            PageSize = page.PageSize,
+            Count = total,
+            ItemCount = items.Length,
+            Items = items
+        };
+    }
+
+    private static CatalogItemSet ToSet(IEnumerable<CatalogItem> items)
+    {
+        var views = items.Select(ToView).ToArray();
+        return new CatalogItemSet { Count = views.Length, Items = views };
+    }
+
+    private static CatalogBrandList ToBrandList(IEnumerable<CatalogBrand> brands)
+    {
+        var items = brands.Select(brand => new CatalogBrandView
+        {
+            Id = brand.Id,
+            Brand = brand.Brand ?? string.Empty
+        }).ToArray();
+        return new CatalogBrandList { Count = items.Length, Items = items };
+    }
+
+    private static CatalogTypeList ToTypeList(IEnumerable<CatalogType> types)
+    {
+        var items = types.Select(type => new CatalogTypeView
+        {
+            Id = type.Id,
+            Type = type.Type ?? string.Empty
+        }).ToArray();
+        return new CatalogTypeList { Count = items.Length, Items = items };
+    }
+
+    private static CatalogFacetSet ToFacetSet(CatalogFacets facets)
+    {
+        var brands = facets.BrandCounts.Select(count => new CatalogFacetView { Id = count.Id, Count = count.Count }).ToArray();
+        var types = facets.TypeCounts.Select(count => new CatalogFacetView { Id = count.Id, Count = count.Count }).ToArray();
+        return new CatalogFacetSet
+        {
+            BrandTotal = facets.BrandTotal,
+            TypeTotal = facets.TypeTotal,
+            BrandCount = brands.Length,
+            TypeCount = types.Length,
+            BrandCounts = brands,
+            TypeCounts = types
+        };
+    }
+
     private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
 
     private static bool TryReadItem(string itemJson, out CatalogItem product, out string error)
@@ -500,7 +606,6 @@ public static class CatalogApi
     private sealed record ErrorPayload(string Status, string Detail);
     private sealed record CreatedPayload(int Id);
     private sealed record StatusPayload(string Status);
-    private sealed record PicturePayload(string Mime, string Base64);
 
     private sealed class CatalogHostEnvironment(IHostEnvironment inner) : IWebHostEnvironment
     {
@@ -513,8 +618,163 @@ public static class CatalogApi
     }
 }
 
-public sealed record StockRequest(int[] ProductIds, int[] Units);
+public sealed class StockRequest
+{
+    public StockRequest()
+    {
+    }
 
-public sealed record StockDecision(string Result, int[] ProductIds);
+    public StockRequest(int[] productIds, int[] units)
+    {
+        ProductIds = productIds ?? [];
+        Units = units ?? [];
+    }
 
-public sealed record GraftStatus(string Status);
+    public int[] ProductIds { get; set; } = [];
+
+    public int[] Units { get; set; } = [];
+}
+
+public sealed class StockDecision
+{
+    public StockDecision()
+    {
+    }
+
+    public StockDecision(string result, int[] productIds)
+    {
+        Result = result ?? string.Empty;
+        ProductIds = productIds ?? [];
+    }
+
+    public string Result { get; set; } = string.Empty;
+
+    public int[] ProductIds { get; set; } = [];
+}
+
+public sealed class GraftStatus
+{
+    public GraftStatus()
+    {
+    }
+
+    public GraftStatus(string status)
+    {
+        Status = status ?? string.Empty;
+    }
+
+    public string Status { get; set; } = string.Empty;
+}
+
+public sealed class CatalogBrandView
+{
+    public int Id { get; set; }
+
+    public string Brand { get; set; } = string.Empty;
+}
+
+public sealed class CatalogTypeView
+{
+    public int Id { get; set; }
+
+    public string Type { get; set; } = string.Empty;
+}
+
+public sealed class CatalogItemView
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Description { get; set; } = string.Empty;
+
+    public double Price { get; set; }
+
+    public string PictureFileName { get; set; } = string.Empty;
+
+    public int CatalogBrandId { get; set; }
+
+    public int CatalogTypeId { get; set; }
+
+    public int AvailableStock { get; set; }
+
+    public int RestockThreshold { get; set; }
+
+    public int MaxStockThreshold { get; set; }
+
+    public CatalogBrandView Brand { get; set; } = new();
+
+    public CatalogTypeView Type { get; set; } = new();
+}
+
+public sealed class CatalogItemHit
+{
+    public int Found { get; set; }
+
+    public CatalogItemView? Item { get; set; }
+}
+
+public sealed class CatalogPage
+{
+    public int PageIndex { get; set; }
+
+    public int PageSize { get; set; }
+
+    public int Count { get; set; }
+
+    public int ItemCount { get; set; }
+
+    public CatalogItemView[] Items { get; set; } = [];
+}
+
+public sealed class CatalogItemSet
+{
+    public int Count { get; set; }
+
+    public CatalogItemView[] Items { get; set; } = [];
+}
+
+public sealed class CatalogBrandList
+{
+    public int Count { get; set; }
+
+    public CatalogBrandView[] Items { get; set; } = [];
+}
+
+public sealed class CatalogTypeList
+{
+    public int Count { get; set; }
+
+    public CatalogTypeView[] Items { get; set; } = [];
+}
+
+public sealed class CatalogFacetView
+{
+    public int Id { get; set; }
+
+    public int Count { get; set; }
+}
+
+public sealed class CatalogFacetSet
+{
+    public int BrandTotal { get; set; }
+
+    public int TypeTotal { get; set; }
+
+    public int BrandCount { get; set; }
+
+    public int TypeCount { get; set; }
+
+    public CatalogFacetView[] BrandCounts { get; set; } = [];
+
+    public CatalogFacetView[] TypeCounts { get; set; } = [];
+}
+
+public sealed class CatalogPicture
+{
+    public int Found { get; set; }
+
+    public string Mime { get; set; } = string.Empty;
+
+    public string Base64 { get; set; } = string.Empty;
+}

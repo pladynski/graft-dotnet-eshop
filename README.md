@@ -139,11 +139,11 @@ When you no longer need the deployment, run [`aspire destroy`](https://aspire.de
 
 ## Catalog and basket on Graftcode
 
-Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and deserializes the JSON strings. Those catalog reads stay strings because a page of catalog items does not round-trip as an array of objects. `OnOrderAwaitingValidation` takes a `StockRequest` record and returns a `StockDecision` record. `OnOrderPaid` takes the same `StockRequest` and returns `GraftStatus`.
+Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minimal API handlers are now public static methods on that class (`GetItem`, `ListItems`, `GetItemsByIds`, `Search`, `ListBrands`, `ListTypes`, `GetFacets`, `CreateItem`, `UpdateItem`, `DeleteItem`, `GetItemPicture`). There is no second graft type and no `MapCatalogApi` route table. `CatalogService` / `ICatalogService` are unchanged as types. The storefront calls those public methods over Graftcode Gateway and maps the generated classes. `ListItems` and `Search` return `CatalogPage` (`Items` is `CatalogItemView[]`). `GetItem` returns `CatalogItemHit`, `GetItemsByIds` returns `CatalogItemSet`, and brands, types, facets, and pictures are classes too. `gg` 1.4.9 round-trips one object and a non-empty object array. An empty complex array still does not, so those callers skip the array when its count is 0. Positional records fail that `gg` NuGet build, so these contracts are classes. `CreateItem`, `UpdateItem`, and `DeleteItem` still use JSON. `OnOrderAwaitingValidation` takes a `StockRequest` and returns a `StockDecision`. `OnOrderPaid` takes the same `StockRequest` and returns `GraftStatus`.
 
 Basket followed the same pattern, in the original file `src/Basket.API/Grpc/BasketService.cs`. That class still talks to the Redis repository. `GetBasket`, `UpdateBasket`, and `DeleteBasket` take no buyer id. The web app passes the current access token on that call with `GraftConfig.InvokeWithHeaders` (`Authorization: Bearer`), and the basket graft checks the JWT before Redis. `OnOrderStarted(buyerId)` is the Ordering service call and requires scope `basket.internal`. These are public static methods. Item lists are parallel `int` arrays on a `BasketResult` record (`Count`, `ProductIds`, `Quantities`, `Status`, `Detail`), not a JSON string. The type stays `eShop.Basket.API.BasketService`, which is what `gg --types` already hosts. There is no `Basket.BasketBase`. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
 
-Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (JSON with a MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
+Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (`CatalogPicture`: MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
 
 `aspire run` still starts `catalog-api`, `basket-api`, `ordering-api`, `order-processor`, `payment-processor`, and `webhooks-api`. Those processes migrate data and keep their HTTP APIs. They do not subscribe to the Aspire event bus. Cross-service calls go through Gateway on RabbitmqPlugin when `ESHOP_GRAFT_TRANSPORT=rabbitmq` (the AppHost sets this on ordering, catalog, and the order processor). A standalone Gateway process sets `EshopGraftHost` so it does not also turn on storefront authentication. A price change calls `ProductPriceChangedIntegrationEventHandler.OnProductPriceChanged` on that same transport.
 
@@ -157,14 +157,15 @@ var uri = $"{remoteServiceBaseUrl}items/{id}";
 return httpClient.GetFromJsonAsync<CatalogItem>(uri);
 
 // after — same CatalogService, generated graft called like a local method
-return Task.FromResult(Parse<CatalogItem>(CatalogApi.GetItem(id)));
+var hit = CatalogApi.GetItem(id);
+return Task.FromResult(hit.Found == 0 ? null : Map(hit.Item));
 ```
 
 The EF query stayed in `CatalogApi`:
 
 ```csharp
-public static string ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
-    Block(async services => ToJson(await ListItemsAsync(
+public static CatalogPage ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
+    Block(async services => ToPage(await ListItemsAsync(
         services, pageIndex, pageSize, EmptyToNull(name), ParseIds(typeIds), ParseIds(brandIds))));
 ```
 
@@ -192,7 +193,7 @@ Counted non-blank, non-comment lines against `main`. The storefront calls genera
 | Web app `BasketService` | 40 | 92 |
 | `basket.proto` | 24 | 0 |
 
-`CatalogApi.cs` grew from 389 to 419 non-blank lines. The route table was replaced by public method wrappers, and order-stock handlers are now `OnOrderAwaitingValidation` and `OnOrderPaid` on the same class. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). `CatalogService` still parses the catalog JSON strings. `BasketService` reads the generated `BasketResult`. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 509 non-blank lines. `src/Basket.API/Grpc/BasketService.cs` is 179 non-blank lines, including `OnOrderStarted`. The hosted type is still `eShop.Basket.API.BasketService`.
+`CatalogApi.cs` grew from 389 to 419 non-blank lines. The route table was replaced by public method wrappers, and order-stock handlers are now `OnOrderAwaitingValidation` and `OnOrderPaid` on the same class. The EF queries stayed in that file. `CatalogService` is 90 lines (71 on `main`). The web app `BasketService` is 92 lines (40 on `main`). `CatalogService` maps the generated catalog classes and does not deserialize those reads. `BasketService` reads the generated `BasketResult`. A handwritten gateway client was larger (123 and 120); the generated grafts replaced it. `CatalogApi.cs` plus `CatalogService` went from 460 to 509 non-blank lines. `src/Basket.API/Grpc/BasketService.cs` is 179 non-blank lines, including `OnOrderStarted`. The hosted type is still `eShop.Basket.API.BasketService`.
 
 Generated OpenAPI documents (`Catalog.API.json`, 1260 lines, and `Catalog.API_v2.json`, 1043 lines) and `Catalog.API.http` left with the route table. They were generated contracts, not the query logic.
 
@@ -235,7 +236,7 @@ dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket
 
 ./gg --runtime netcore \
   --modules ./artifacts/catalog-graft/Catalog.API.dll,./artifacts/basket-graft/Basket.API.dll \
-  --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult \
+  --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Catalog.API.CatalogItemView,eShop.Catalog.API.CatalogBrandView,eShop.Catalog.API.CatalogTypeView,eShop.Catalog.API.CatalogItemHit,eShop.Catalog.API.CatalogPage,eShop.Catalog.API.CatalogItemSet,eShop.Catalog.API.CatalogBrandList,eShop.Catalog.API.CatalogTypeList,eShop.Catalog.API.CatalogFacetView,eShop.Catalog.API.CatalogFacetSet,eShop.Catalog.API.CatalogPicture,eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult \
   --port 8000 \
   --corsAllowedOrigins "http://localhost:5045,https://localhost:7298"
 ```
@@ -250,14 +251,14 @@ The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets
 With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet, and copy the install command. The packages checked in for this slice were produced that way:
 
 ```bash
-dotnet add package graft.nuget.catalog.api_2x9pc9 -v 1.0.0 --source https://grft.dev/746a9a1f-f85d-4302-b865-bf23452adc27__free
+dotnet add package graft.nuget.catalog.api_asj4vd -v 1.0.0 --source https://grft.dev/a0590328-d7b5-4ccf-942e-01fe34dc0a97__free
 dotnet add package graft.nuget.basket.api_o573bl -v 1.0.0 --source https://grft.dev/45c50420-b32a-4986-9e98-4d00a9736c0a__free
 dotnet add package graft.nuget.ordering.api_aro1yz -v 1.0.0 --source https://grft.dev/d4b3fcf1-fd03-44ca-9b16-ab13e37abc20__free
 dotnet add package graft.nuget.paymentprocessor_2hchbx -v 1.0.0 --source https://grft.dev/fe8171ea-ebec-4496-860e-a0a48111bd04__free
 dotnet add package graft.nuget.webhooks.api_lqs8sp -v 1.0.0 --source https://grft.dev/414d45c0-81b9-448a-af05-40716d296f99__free
 ```
 
-`nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
+`nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. The catalog graft is built with `gg` 1.4.9 and Hypertube.Netcore.Sdk 3.1.17. The other nupkgs in `graft/feed` declare that same SDK version so one restore graph can hold them. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
 
 The generated types are `graft.nuget.eShop.Catalog.API.CatalogApi` and `graft.nuget.eShop.Basket.API.BasketService`. `CatalogService` and the web app `BasketService` set `GraftConfig.Host` (default `ws://localhost:8000/ws`) and call those methods. Basket's DI constructor is private so the graft only contains the static methods. A public constructor of `IBasketRepository` and `ILogger` makes the NuGet graft fail to build.
 
@@ -335,7 +336,7 @@ export ConnectionStrings__redis="localhost:6379"
 export ConnectionStrings__orderingdb="Host=localhost;Port=5432;Database=orderingdb;Username=postgres;Password=..."
 export ConnectionStrings__webhooksdb="Host=localhost;Port=5432;Database=webhooksdb;Username=postgres;Password=..."
 
-./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus
+./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Catalog.API.CatalogItemView,eShop.Catalog.API.CatalogBrandView,eShop.Catalog.API.CatalogTypeView,eShop.Catalog.API.CatalogItemHit,eShop.Catalog.API.CatalogPage,eShop.Catalog.API.CatalogItemSet,eShop.Catalog.API.CatalogBrandList,eShop.Catalog.API.CatalogTypeList,eShop.Catalog.API.CatalogFacetView,eShop.Catalog.API.CatalogFacetSet,eShop.Catalog.API.CatalogPicture
 ./gg /path/to/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json --types eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult
 ./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockRejectedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentSucceededIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentFailedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GraftStatus
 ./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler

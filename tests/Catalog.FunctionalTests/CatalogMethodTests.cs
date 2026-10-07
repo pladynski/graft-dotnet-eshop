@@ -17,9 +17,9 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsRespectsPageSize()
     {
-        var page = Page(CatalogApi.ListItems(0, 5, "", "", ""));
+        var page = CatalogApi.ListItems(0, 5, "", "", "");
 
-        Assert.Equal(5, page.Data.Count());
+        Assert.Equal(5, page.ItemCount);
         Assert.Equal(0, page.PageIndex);
         Assert.Equal(5, page.PageSize);
     }
@@ -27,7 +27,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void UpdateItemWithoutPriceChangePersistsStock()
     {
-        var item = Item(CatalogApi.GetItem(1));
+        var item = Editable(CatalogApi.GetItem(1));
         var priorStock = item.AvailableStock;
         item.AvailableStock -= 1;
 
@@ -42,7 +42,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void UpdateItemWithPriceChangePersistsPriceAndStock()
     {
-        var item = Item(CatalogApi.GetItem(1));
+        var item = Editable(CatalogApi.GetItem(1));
         var priorStock = item.AvailableStock;
         item.AvailableStock -= 1;
         item.Price = 1.99m;
@@ -52,17 +52,17 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
 
         Assert.Equal("updated", updated);
         Assert.Equal(item.Id, saved.Id);
-        Assert.Equal(1.99m, saved.Price);
+        Assert.Equal(1.99, saved.Price, 2);
         Assert.NotEqual(priorStock, saved.AvailableStock);
     }
 
     [Fact]
     public void GetItemsByIdsReturnsEachRequestedItem()
     {
-        var items = JsonSerializer.Deserialize<List<CatalogItem>>(CatalogApi.GetItemsByIds("1,2,3"), Json);
+        var items = CatalogApi.GetItemsByIds("1,2,3");
 
-        Assert.NotNull(items);
         Assert.Equal(3, items.Count);
+        Assert.Equal(3, items.Items.Length);
     }
 
     [Fact]
@@ -76,43 +76,43 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByExactName()
     {
-        var page = Page(CatalogApi.ListItems(0, 5, "Wanderer Black Hiking Boots", "", ""));
+        var page = CatalogApi.ListItems(0, 5, "Wanderer Black Hiking Boots", "", "");
 
-        Assert.NotNull(page.Data);
+        Assert.Equal(1, page.ItemCount);
         Assert.Equal(1, page.Count);
         Assert.Equal(0, page.PageIndex);
         Assert.Equal(5, page.PageSize);
-        Assert.Equal("Wanderer Black Hiking Boots", page.Data.First().Name);
+        Assert.Equal("Wanderer Black Hiking Boots", page.Items[0].Name);
     }
 
     [Fact]
     public void ListItemsFiltersByPartialName()
     {
-        var page = Page(CatalogApi.ListItems(0, 5, "Alpine", "", ""));
+        var page = CatalogApi.ListItems(0, 5, "Alpine", "", "");
 
-        Assert.NotNull(page.Data);
         Assert.Equal(4, page.Count);
         Assert.Equal(0, page.PageIndex);
         Assert.Equal(5, page.PageSize);
-        Assert.Contains("Alpine", page.Data.First().Name);
+        Assert.Contains("Alpine", page.Items[0].Name);
     }
 
     [Fact]
     public void GetItemPictureReturnsWebpBytes()
     {
-        using var document = JsonDocument.Parse(CatalogApi.GetItemPicture(1));
+        var picture = CatalogApi.GetItemPicture(1);
 
-        Assert.Equal("image/webp", document.RootElement.GetProperty("mime").GetString());
-        Assert.False(string.IsNullOrEmpty(document.RootElement.GetProperty("base64").GetString()));
+        Assert.Equal(1, picture.Found);
+        Assert.Equal("image/webp", picture.Mime);
+        Assert.False(string.IsNullOrEmpty(picture.Base64));
     }
 
     [Fact]
     public void SearchFallsBackToNameWhenEmbeddingsAreOff()
     {
-        var page = Page(CatalogApi.Search(0, 5, "Wanderer"));
+        var page = CatalogApi.Search(0, 5, "Wanderer");
 
         Assert.Equal(1, page.Count);
-        Assert.NotNull(page.Data);
+        Assert.Equal(1, page.ItemCount);
         Assert.Equal(0, page.PageIndex);
         Assert.Equal(5, page.PageSize);
     }
@@ -120,8 +120,8 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByTypeAndBrand()
     {
-        var page = Page(CatalogApi.ListItems(0, 5, "", "3", "3"));
-        var first = page.Data.First();
+        var page = CatalogApi.ListItems(0, 5, "", "3", "3");
+        var first = page.Items[0];
 
         Assert.Equal(4, page.Count);
         Assert.Equal(0, page.PageIndex);
@@ -133,30 +133,30 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByBrand()
     {
-        var page = Page(CatalogApi.ListItems(0, 5, "", "", "3"));
+        var page = CatalogApi.ListItems(0, 5, "", "", "3");
 
         Assert.Equal(11, page.Count);
         Assert.Equal(0, page.PageIndex);
         Assert.Equal(5, page.PageSize);
-        Assert.Equal(3, page.Data.First().CatalogBrandId);
+        Assert.Equal(3, page.Items[0].CatalogBrandId);
     }
 
     [Fact]
     public void ListTypesReturnsSeededTypes()
     {
-        var types = JsonSerializer.Deserialize<List<CatalogType>>(CatalogApi.ListTypes(), Json);
+        var types = CatalogApi.ListTypes();
 
-        Assert.NotNull(types);
         Assert.Equal(8, types.Count);
+        Assert.Equal(8, types.Items.Length);
     }
 
     [Fact]
     public void ListBrandsReturnsSeededBrands()
     {
-        var brands = JsonSerializer.Deserialize<List<CatalogBrand>>(CatalogApi.ListBrands(), Json);
+        var brands = CatalogApi.ListBrands();
 
-        Assert.NotNull(brands);
         Assert.Equal(13, brands.Count);
+        Assert.Equal(13, brands.Items.Length);
     }
 
     [Fact]
@@ -190,13 +190,13 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
         var deleted = Status(CatalogApi.DeleteItem(id));
 
         Assert.Equal("deleted", deleted);
-        Assert.Equal("null", CatalogApi.GetItem(id));
+        Assert.Equal(0, CatalogApi.GetItem(id).Found);
     }
 
     [Fact]
     public void GetItemRejectsInvalidId()
     {
-        Assert.Equal("null", CatalogApi.GetItem(0));
+        Assert.Equal(0, CatalogApi.GetItem(0).Found);
     }
 
     [Fact]
@@ -204,26 +204,41 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     {
         const int missingId = int.MaxValue;
 
-        Assert.Equal("null", CatalogApi.GetItem(missingId));
+        Assert.Equal(0, CatalogApi.GetItem(missingId).Found);
         Assert.Equal("notFound", Status(CatalogApi.DeleteItem(missingId)));
     }
 
     [Fact]
     public void ListItemsPastTheLastPageReturnsEmptyData()
     {
-        var page = Page(CatalogApi.ListItems(1000, 10, "", "", ""));
+        var page = CatalogApi.ListItems(1000, 10, "", "", "");
 
-        Assert.Empty(page.Data);
+        Assert.Equal(0, page.ItemCount);
+        Assert.Empty(page.Items);
         Assert.Equal(1000, page.PageIndex);
     }
 
-    private static PaginatedItems<CatalogItem> Page(string json) =>
-        JsonSerializer.Deserialize<PaginatedItems<CatalogItem>>(json, Json)
-        ?? throw new InvalidOperationException("Catalog page JSON was empty.");
+    private static CatalogItemView Item(CatalogItemHit hit) =>
+        hit.Found == 1 && hit.Item is not null
+            ? hit.Item
+            : throw new InvalidOperationException("Catalog item was missing.");
 
-    private static CatalogItem Item(string json) =>
-        JsonSerializer.Deserialize<CatalogItem>(json, Json)
-        ?? throw new InvalidOperationException("Catalog item JSON was empty.");
+    private static CatalogItem Editable(CatalogItemHit hit)
+    {
+        var view = Item(hit);
+        return new CatalogItem(view.Name)
+        {
+            Id = view.Id,
+            Description = view.Description,
+            Price = (decimal)view.Price,
+            PictureFileName = view.PictureFileName,
+            CatalogBrandId = view.CatalogBrandId,
+            CatalogTypeId = view.CatalogTypeId,
+            AvailableStock = view.AvailableStock,
+            RestockThreshold = view.RestockThreshold,
+            MaxStockThreshold = view.MaxStockThreshold
+        };
+    }
 
     private static string Status(string json)
     {

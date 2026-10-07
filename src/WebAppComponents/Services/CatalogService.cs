@@ -1,16 +1,17 @@
 ﻿// Graftcode catalog slice — same CatalogService, calls the generated Catalog graft.
-using System.Text.Json;
 using eShop.WebAppComponents.Catalog;
 using graft.nuget.Catalog.API;
 using CatalogApi = graft.nuget.eShop.Catalog.API.CatalogApi;
+using GraftBrand = graft.nuget.eShop.Catalog.API.CatalogBrandView;
+using GraftFacet = graft.nuget.eShop.Catalog.API.CatalogFacetSet;
+using GraftItem = graft.nuget.eShop.Catalog.API.CatalogItemView;
+using GraftPage = graft.nuget.eShop.Catalog.API.CatalogPage;
 
 namespace eShop.WebAppComponents.Services;
 
 public class CatalogService : ICatalogService
 {
     public const string DefaultHost = "ws://localhost:8000/ws";
-
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     static CatalogService() => Configure();
 
@@ -27,31 +28,63 @@ public class CatalogService : ICatalogService
         GraftConfig.Stateless = true;
     }
 
-    public Task<CatalogItem?> GetCatalogItem(int id) =>
-        Task.FromResult(Parse<CatalogItem>(CatalogApi.GetItem(id)));
+    public Task<CatalogItem?> GetCatalogItem(int id)
+    {
+        var hit = CatalogApi.GetItem(id);
+        if (hit is null || hit.Found == 0)
+        {
+            return Task.FromResult<CatalogItem?>(null);
+        }
+
+        return Task.FromResult<CatalogItem?>(Map(hit.Item));
+    }
 
     public Task<CatalogResult> GetCatalogItems(int pageIndex, int pageSize, int[]? brands, int[]? types) =>
-        Task.FromResult(Parse<CatalogResult>(CatalogApi.ListItems(pageIndex, pageSize, string.Empty, Join(types), Join(brands)))!);
+        Task.FromResult(Map(CatalogApi.ListItems(pageIndex, pageSize, string.Empty, Join(types), Join(brands))));
 
-    public Task<List<CatalogItem>> GetCatalogItems(IEnumerable<int> ids) =>
-        Task.FromResult(Parse<List<CatalogItem>>(CatalogApi.GetItemsByIds(Join(ids)))!);
+    public Task<List<CatalogItem>> GetCatalogItems(IEnumerable<int> ids)
+    {
+        var requested = ids?.ToArray() ?? [];
+        if (requested.Length == 0)
+        {
+            return Task.FromResult(new List<CatalogItem>());
+        }
+
+        var set = CatalogApi.GetItemsByIds(Join(requested));
+        var items = set is null || set.Count == 0
+            ? new List<CatalogItem>()
+            : set.Items.Select(Map).ToList();
+        return Task.FromResult(items);
+    }
 
     public Task<CatalogResult> GetCatalogItemsWithSemanticRelevance(int page, int take, string text) =>
-        Task.FromResult(Parse<CatalogResult>(CatalogApi.Search(page, take, text ?? string.Empty))!);
+        Task.FromResult(Map(CatalogApi.Search(page, take, text ?? string.Empty)));
 
-    public Task<IEnumerable<CatalogBrand>> GetBrands() =>
-        Task.FromResult<IEnumerable<CatalogBrand>>(Parse<List<CatalogBrand>>(CatalogApi.ListBrands())!);
+    public Task<IEnumerable<CatalogBrand>> GetBrands()
+    {
+        var brands = CatalogApi.ListBrands();
+        IEnumerable<CatalogBrand> items = brands is null || brands.Count == 0
+            ? []
+            : brands.Items.Select(brand => new CatalogBrand(brand.Id, brand.Brand ?? string.Empty));
+        return Task.FromResult(items);
+    }
 
-    public Task<IEnumerable<CatalogItemType>> GetTypes() =>
-        Task.FromResult<IEnumerable<CatalogItemType>>(Parse<List<CatalogItemType>>(CatalogApi.ListTypes())!);
+    public Task<IEnumerable<CatalogItemType>> GetTypes()
+    {
+        var types = CatalogApi.ListTypes();
+        IEnumerable<CatalogItemType> items = types is null || types.Count == 0
+            ? []
+            : types.Items.Select(type => new CatalogItemType(type.Id, type.Type ?? string.Empty));
+        return Task.FromResult(items);
+    }
 
     public Task<CatalogFacets> GetCatalogFacets(int[]? brands, int[]? types) =>
-        Task.FromResult(Parse<CatalogFacets>(CatalogApi.GetFacets(Join(types), Join(brands)))!);
+        Task.FromResult(Map(CatalogApi.GetFacets(Join(types), Join(brands))));
 
     public (string Mime, byte[] Bytes)? GetItemPicture(int id)
     {
-        var picture = Parse<PicturePayload>(CatalogApi.GetItemPicture(id));
-        if (picture is null || string.IsNullOrEmpty(picture.Base64))
+        var picture = CatalogApi.GetItemPicture(id);
+        if (picture is null || picture.Found == 0 || string.IsNullOrEmpty(picture.Base64))
         {
             return null;
         }
@@ -95,18 +128,51 @@ public class CatalogService : ICatalogService
         """;
     }
 
-    private static T? Parse<T>(string json)
+    private static CatalogResult Map(GraftPage? page)
     {
-        if (string.IsNullOrWhiteSpace(json) || json == "null")
+        if (page is null)
         {
-            return default;
+            return new CatalogResult(0, 0, 0, []);
         }
 
-        return JsonSerializer.Deserialize<T>(json, JsonOptions);
+        var data = page.ItemCount == 0
+            ? new List<CatalogItem>()
+            : page.Items.Select(Map).ToList();
+        return new CatalogResult(page.PageIndex, page.PageSize, page.Count, data);
+    }
+
+    private static CatalogFacets Map(GraftFacet? facets)
+    {
+        if (facets is null)
+        {
+            return new CatalogFacets([], [], 0, 0);
+        }
+
+        var brands = facets.BrandCount == 0
+            ? Array.Empty<CatalogFacetCount>()
+            : facets.BrandCounts.Select(count => new CatalogFacetCount(count.Id, count.Count)).ToArray();
+        var types = facets.TypeCount == 0
+            ? Array.Empty<CatalogFacetCount>()
+            : facets.TypeCounts.Select(count => new CatalogFacetCount(count.Id, count.Count)).ToArray();
+        return new CatalogFacets(brands, types, facets.BrandTotal, facets.TypeTotal);
+    }
+
+    private static CatalogItem Map(GraftItem item)
+    {
+        var brand = item.Brand ?? new GraftBrand();
+        var type = item.Type ?? new graft.nuget.eShop.Catalog.API.CatalogTypeView();
+        return new CatalogItem(
+            item.Id,
+            item.Name ?? string.Empty,
+            item.Description ?? string.Empty,
+            (decimal)item.Price,
+            string.Empty,
+            item.CatalogBrandId,
+            new CatalogBrand(brand.Id == 0 ? item.CatalogBrandId : brand.Id, brand.Brand ?? string.Empty),
+            item.CatalogTypeId,
+            new CatalogItemType(type.Id == 0 ? item.CatalogTypeId : type.Id, type.Type ?? string.Empty));
     }
 
     private static string Join(IEnumerable<int>? ids) =>
         ids is null ? string.Empty : string.Join(',', ids);
-
-    private sealed record PicturePayload(string Mime, string Base64);
 }
