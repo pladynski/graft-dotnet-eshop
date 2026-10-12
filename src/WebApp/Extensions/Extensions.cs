@@ -21,13 +21,10 @@ public static class Extensions
         builder.Services.AddSingleton<IProductImageUrlProvider, ProductImageUrlProvider>();
         builder.AddAIServices();
 
-        // Catalog and basket calls go to Graftcode Gateway (default ws://localhost:8000/ws).
+        // Catalog, basket, and ordering calls go to Graftcode Gateway (default ws://localhost:8000/ws).
         builder.Services.AddScoped<CatalogService>();
         builder.Services.AddScoped<ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
-
-        builder.Services.AddHttpClient<OrderingService>(o => o.BaseAddress = new("https+http://ordering-api"))
-            .AddApiVersion(1.0)
-            .AddAuthToken();
+        builder.Services.AddScoped<OrderingService>();
     }
 
     public static void AddAuthenticationServices(this IHostApplicationBuilder builder)

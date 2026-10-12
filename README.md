@@ -6,7 +6,7 @@ A reference .NET application implementing an e-commerce website using a services
 
 ![eShop homepage screenshot](img/eshop_homepage.png)
 
-This fork keeps the AdventureWorks services. Catalog reads and basket updates from the Blazor storefront are in-place Graftcode facades: the original `CatalogApi` and `BasketService` methods, called through Graftcode Gateway instead of catalog REST and basket gRPC. Order integration that used to publish on the Aspire RabbitMQ event bus (order started, stock, payment, price, webhooks) is the same style of graft call over [RabbitmqPlugin](https://github.com/grft-dev/graftcode-plugins/tree/main/rabbitmq). Moving that path to Service Bus later is a plugin name and config change, not a new call site. The storefront orders page polls, because a Gateway process does not own the Blazor circuit. See [Catalog and basket on Graftcode](#catalog-and-basket-on-graftcode).
+This fork keeps the AdventureWorks services. Catalog reads, basket updates, and the storefront orders page are in-place Graftcode facades: the original `CatalogApi`, `BasketService`, and `OrdersApi` methods, called through Graftcode Gateway instead of catalog REST, basket gRPC, and the storefront order HTTP client. Order integration that used to publish on the Aspire RabbitMQ event bus (order started, stock, payment, price, webhooks) is the same style of graft call over [RabbitmqPlugin](https://github.com/grft-dev/graftcode-plugins/tree/main/rabbitmq). Moving that path to Service Bus later is a plugin name and config change, not a new call site. The storefront orders page polls, because a Gateway process does not own the Blazor circuit. See [Catalog and basket on Graftcode](#catalog-and-basket-on-graftcode).
 
 ## Getting Started
 
@@ -143,6 +143,8 @@ Catalog business logic stayed in `src/Catalog.API/Apis/CatalogApi.cs`. The Minim
 
 Basket followed the same pattern, in the original file `src/Basket.API/Grpc/BasketService.cs`. That class still talks to the Redis repository. `GetBasket`, `UpdateBasket`, and `DeleteBasket` take no buyer id. The web app passes the current access token on that call with `GraftConfig.InvokeWithHeaders` (`Authorization: Bearer`), and the basket graft checks the JWT before Redis. `OnOrderStarted(buyerId)` is the Ordering service call and requires scope `basket.internal`. These are public static methods. Item lists are parallel `int` arrays on a `BasketResult` class (`Count`, `ProductIds`, `Quantities`, `Status`, `Detail`), not a JSON string. The caller does not read `ProductIds` or `Quantities` when `Count` is 0, because an empty `int[]` property still throws on `gg` 1.4.9. The type stays `eShop.Basket.API.BasketService`, which is what `gg --types` already hosts. There is no `Basket.BasketBase`. The web app type is still `BasketService`. It no longer uses `GrpcBasketClient`. `MapGrpcService` and `src/Basket.API/Proto/basket.proto` are gone. The MAUI client keeps its own proto copy and is outside this slice.
 
+Ordering storefront methods stayed on `src/Ordering.API/Apis/OrdersApi.cs`: `ListOrders`, `GetOrder`, `CancelOrder`, and `CreateOrder`. They take no buyer id. WebApp `OrderingService` sends the current access token with `GraftConfig.InvokeWithHeaders` (`Authorization: Bearer`), never `SetHeaders`. The graft checks the JWT (signature, issuer, lifetime, audience `orders`, scope `orders`) and uses the verified `sub` as the buyer. Results are `OrderList`, `OrderHit`, and `OrderMutation` classes. `OrderList.OrderNumbers` is an `int[]` property, so callers skip the arrays when `Count` is 0 (the same `gg` 1.4.9 empty `int[]` property failure). The HTTP order routes stay: the MAUI client still calls `GET` and `POST /api/orders`, `GET /api/orders/{id}`, and `PUT /api/orders/cancel` through the mobile BFF. `WebhookClient` is still HTTP.
+
 Product images: browsers need a URL, so the web app maps `GET /product-images/{id}` and returns the bytes from `CatalogApi.GetItemPicture` (`CatalogPicture`: MIME type and base64). That is the only leftover HTTP for catalog pictures. The mobile BFF no longer proxies `/api/catalog/...`. The MAUI catalog client still speaks those old REST paths and will not hit this gateway until it calls the same public methods.
 
 `aspire run` still starts `catalog-api`, `basket-api`, `ordering-api`, `order-processor`, `payment-processor`, and `webhooks-api`. Those processes migrate data and keep their HTTP APIs. They do not subscribe to the Aspire event bus. Cross-service calls go through Gateway on RabbitmqPlugin when `ESHOP_GRAFT_TRANSPORT=rabbitmq` (the AppHost sets this on ordering, catalog, and the order processor). A standalone Gateway process sets `EshopGraftHost` so it does not also turn on storefront authentication. A price change calls `ProductPriceChangedIntegrationEventHandler.OnProductPriceChanged` on that same transport.
@@ -176,12 +178,12 @@ Basket updates no longer build a protobuf request:
 await basketClient.UpdateBasketAsync(updatePayload);
 
 // after — same BasketService, generated graft
-BasketApi.UpdateBasket(await BuyerIdAsync(), payload);
+GraftConfig.InvokeWithHeaders(() => BasketApi.UpdateBasket(productIds, quantities), headers);
 ```
 
 ### Why Graftcode
 
-Counted non-blank, non-comment lines against `main`. The storefront calls generated Graft packages (`CatalogApi.GetItem`, `BasketApi.UpdateBasket`). It does not open a socket or invoke methods by name.
+Counted non-blank, non-comment lines against `main`. The storefront calls generated Graft packages (`CatalogApi.GetItem`, `BasketApi.UpdateBasket`, `OrdersApi.ListOrders`). It does not open a socket or invoke methods by name.
 
 | Piece | Before | After |
 | --- | ---: | ---: |
@@ -219,7 +221,7 @@ Install Graftcode Gateway:
 curl -fsSL grft.dev/get/gg | sh
 ```
 
-Catalog needs Postgres with pgvector (the image Aspire uses). Basket needs Redis. One `gg` process can host both assemblies on port 8000.
+Catalog needs Postgres with pgvector (the image Aspire uses). Basket needs Redis. Ordering needs Postgres. One `gg` process can host the assemblies on port 8000.
 
 ```bash
 docker run -d --name eshop-catalog-pg \
@@ -227,16 +229,23 @@ docker run -d --name eshop-catalog-pg \
   -e POSTGRES_DB=catalogdb \
   -p 5432:5432 ankane/pgvector
 docker run -d --name eshop-basket-redis -p 6379:6379 redis
+docker run -d --name eshop-ordering-pg \
+  -e POSTGRES_PASSWORD=Pass@word \
+  -e POSTGRES_DB=orderingdb \
+  -p 5433:5432 postgres:16-alpine
 
 export ConnectionStrings__catalogdb="Host=localhost;Port=5432;Database=catalogdb;Username=postgres;Password=Pass@word"
 export ConnectionStrings__redis="localhost:6379"
+export ConnectionStrings__orderingdb="Host=localhost;Port=5433;Database=orderingdb;Username=postgres;Password=Pass@word"
+# Ordering graft calls also need the identity authority and audience "orders" (Identity__Url, Identity__Audience).
 
 dotnet publish src/Catalog.API/Catalog.API.csproj -c Release -o ./artifacts/catalog-graft
 dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket-graft
+dotnet publish src/Ordering.API/Ordering.API.csproj -c Release -o ./artifacts/ordering-graft
 
 ./gg --runtime netcore \
-  --modules ./artifacts/catalog-graft/Catalog.API.dll,./artifacts/basket-graft/Basket.API.dll \
-  --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Catalog.API.CatalogItemView,eShop.Catalog.API.CatalogBrandView,eShop.Catalog.API.CatalogTypeView,eShop.Catalog.API.CatalogItemHit,eShop.Catalog.API.CatalogPage,eShop.Catalog.API.CatalogItemSet,eShop.Catalog.API.CatalogBrandList,eShop.Catalog.API.CatalogTypeList,eShop.Catalog.API.CatalogFacetView,eShop.Catalog.API.CatalogFacetSet,eShop.Catalog.API.CatalogPicture,eShop.Catalog.API.CatalogItemWrite,eShop.Catalog.API.CatalogMutation,eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult \
+  --modules ./artifacts/catalog-graft/Catalog.API.dll,./artifacts/basket-graft/Basket.API.dll,./artifacts/ordering-graft/Ordering.API.dll \
+  --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Catalog.API.CatalogItemView,eShop.Catalog.API.CatalogBrandView,eShop.Catalog.API.CatalogTypeView,eShop.Catalog.API.CatalogItemHit,eShop.Catalog.API.CatalogPage,eShop.Catalog.API.CatalogItemSet,eShop.Catalog.API.CatalogBrandList,eShop.Catalog.API.CatalogTypeList,eShop.Catalog.API.CatalogFacetView,eShop.Catalog.API.CatalogFacetSet,eShop.Catalog.API.CatalogPicture,eShop.Catalog.API.CatalogItemWrite,eShop.Catalog.API.CatalogMutation,eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult,eShop.Ordering.API.OrdersApi,eShop.Ordering.API.OrderList,eShop.Ordering.API.OrderHit,eShop.Ordering.API.OrderMutation \
   --port 8000 \
   --corsAllowedOrigins "http://localhost:5045,https://localhost:7298"
 ```
@@ -244,7 +253,7 @@ dotnet publish src/Basket.API/Basket.API.csproj -c Release -o ./artifacts/basket
 - Graftcode Vision: http://localhost:8000
 - WebSocket: `ws://localhost:8000/ws`
 
-The first catalog call migrates and seeds `Setup/catalog.json`. The AppHost sets `CATALOG_GRAFT_HOST` and `BASKET_GRAFT_HOST` to `ws://localhost:8000/ws` on the web app. Start the gateway before opening the storefront.
+The first catalog call migrates and seeds `Setup/catalog.json`. The first ordering call migrates and seeds card types. The AppHost sets `CATALOG_GRAFT_HOST`, `BASKET_GRAFT_HOST`, and `ORDERING_GRAFT_HOST` to `ws://localhost:8000/ws` on the web app. Start the gateway before opening the storefront.
 
 ### Install the grafts
 
@@ -253,14 +262,14 @@ With `gg` running, open Graftcode Vision at http://localhost:8000, choose NuGet,
 ```bash
 dotnet add package graft.nuget.catalog.api_najknh -v 1.0.0 --source https://grft.dev/1e9c2fa9-d216-43f1-985e-d128c3f77a09__free
 dotnet add package graft.nuget.basket.api_o573bl -v 1.0.0 --source https://grft.dev/42021ce3-78fc-4ed7-a1d5-0024c5a2ac75__free
-dotnet add package graft.nuget.ordering.api_aro1yz -v 1.0.0 --source https://grft.dev/ecf6c57a-6382-497f-909c-77058276f34b__free
+dotnet add package graft.nuget.ordering.api_lio0wl -v 1.0.0 --source https://grft.dev/a135e304-e0e9-45d7-ab7a-1e05e127e896__free
 dotnet add package graft.nuget.paymentprocessor_bhabr6 -v 1.0.0 --source https://grft.dev/7890677b-b84b-4f31-b3e8-00bf987d215b__free
 dotnet add package graft.nuget.webhooks.api_lqs8sp -v 1.0.0 --source https://grft.dev/1144e9c6-08bf-4f4c-80ea-d0684826a743__free
 ```
 
 `nuget.config` also restores those same nupkgs from `graft/feed`, so `dotnet build` does not need the registry to be up. These grafts were built with `gg` 1.4.9 and depend on Hypertube.Netcore.Sdk 3.1.18. If you host the modules again, Vision prints a new command. Replace the `PackageReference` and the nupkg in `graft/feed` with that package. The package id suffix comes from the gateway; it is not a hand-written name.
 
-The generated types are `graft.nuget.eShop.Catalog.API.CatalogApi` and `graft.nuget.eShop.Basket.API.BasketService`. `CatalogService` and the web app `BasketService` set `GraftConfig.Host` (default `ws://localhost:8000/ws`) and call those methods. Basket's DI constructor is private so the graft only contains the static methods. A public constructor of `IBasketRepository` and `ILogger` makes the NuGet graft fail to build.
+The generated types are `graft.nuget.eShop.Catalog.API.CatalogApi`, `graft.nuget.eShop.Basket.API.BasketService`, and `graft.nuget.eShop.Ordering.API.OrdersApi`. `CatalogService` and the web app `BasketService` set `GraftConfig.Host` (default `ws://localhost:8000/ws`) and call those methods. Basket's DI constructor is private so the graft only contains the static methods. A public constructor of `IBasketRepository` and `ILogger` makes the NuGet graft fail to build.
 
 `CatalogService` and `BasketService` run inside the Blazor Server process, so the storefront does not need browser CORS for these calls. Pass `--corsAllowedOrigins` when a browser client calls the gateway from another origin (the web app launch profile is `http://localhost:5045` and `https://localhost:7298`).
 
@@ -338,12 +347,12 @@ export ConnectionStrings__webhooksdb="Host=localhost;Port=5432;Database=webhooks
 
 ./gg /path/to/Catalog.API.dll --config graft/pluginConfig.catalog.rabbitmq.json --types eShop.Catalog.API.CatalogApi,eShop.Catalog.API.StockRequest,eShop.Catalog.API.StockDecision,eShop.Catalog.API.GraftStatus,eShop.Catalog.API.CatalogItemView,eShop.Catalog.API.CatalogBrandView,eShop.Catalog.API.CatalogTypeView,eShop.Catalog.API.CatalogItemHit,eShop.Catalog.API.CatalogPage,eShop.Catalog.API.CatalogItemSet,eShop.Catalog.API.CatalogBrandList,eShop.Catalog.API.CatalogTypeList,eShop.Catalog.API.CatalogFacetView,eShop.Catalog.API.CatalogFacetSet,eShop.Catalog.API.CatalogPicture,eShop.Catalog.API.CatalogItemWrite,eShop.Catalog.API.CatalogMutation
 ./gg /path/to/Basket.API.dll --config graft/pluginConfig.basket.rabbitmq.json --types eShop.Basket.API.BasketService,eShop.Basket.API.BasketResult
-./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockRejectedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentSucceededIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentFailedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GraftStatus
+./gg /path/to/Ordering.API.dll --config graft/pluginConfig.ordering.rabbitmq.json --types eShop.Ordering.API.OrdersApi,eShop.Ordering.API.OrderList,eShop.Ordering.API.OrderHit,eShop.Ordering.API.OrderMutation,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GracePeriodConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockConfirmedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderStockRejectedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentSucceededIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.OrderPaymentFailedIntegrationEventHandler,eShop.Ordering.API.Application.IntegrationEvents.EventHandling.GraftStatus
 ./gg /path/to/PaymentProcessor.dll --config graft/pluginConfig.payment.rabbitmq.json --types eShop.PaymentProcessor.IntegrationEvents.EventHandling.OrderStatusChangedToStockConfirmedIntegrationEventHandler,eShop.PaymentProcessor.IntegrationEvents.EventHandling.PaymentResult
 ./gg /path/to/Webhooks.API.dll --config graft/pluginConfig.webhooks.rabbitmq.json --types Webhooks.API.IntegrationEvents.OrderStatusChangedToPaidIntegrationEventHandler,Webhooks.API.IntegrationEvents.OrderStatusChangedToShippedIntegrationEventHandler,Webhooks.API.IntegrationEvents.ProductPriceChangedIntegrationEventHandler,Webhooks.API.IntegrationEvents.StockRequest,Webhooks.API.IntegrationEvents.GraftStatus
 ```
 
-The storefront websocket gateway on port 8000 can still host catalog and basket for reads. Integration calls use the RabbitmqPlugin processes above, even when the browser path stays on `ws://localhost:8000/ws`. If `ESHOP_GRAFT_TRANSPORT` is not `rabbitmq`, ordering logs and skips the remote call so unit tests do not need a broker. The AppHost sets the variable. Without the five `gg` processes and a matching `ESHOP_GRAFT_PLUGIN_HOST`, order stock, payment, basket cleanup, and webhooks do not run.
+The storefront websocket gateway on port 8000 can still host catalog, basket, and user orders. Integration calls use the RabbitmqPlugin processes above, even when the browser path stays on `ws://localhost:8000/ws`. If `ESHOP_GRAFT_TRANSPORT` is not `rabbitmq`, ordering logs and skips the remote call so unit tests do not need a broker. The AppHost sets the variable. Without the five `gg` processes and a matching `ESHOP_GRAFT_PLUGIN_HOST`, order stock, payment, basket cleanup, and webhooks do not run.
 
 Server configs are `graft/pluginConfig.*.rabbitmq.json` (`gg --config`). Client samples are `graft/graftConfig.*.json` (`GraftConfig.SetConfig`). Do not pass a server file to `SetConfig`. The integration processes build that client JSON from the environment variables above. `ESHOP_GRAFT_PLUGIN_NAME` defaults to `RabbitmqPlugin`. If the built library is `libRabbitmqPlugin.dll`, set the name to `libRabbitmqPlugin`.
 

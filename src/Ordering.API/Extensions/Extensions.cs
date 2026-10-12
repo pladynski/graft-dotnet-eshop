@@ -6,7 +6,8 @@ internal static class Extensions
     {
         var services = builder.Services;
         
-        // Gateway hosts the public methods. They do not validate storefront JWTs.
+        // Storefront graft methods validate the caller JWT themselves. Bearer middleware
+        // does not run on a graft invocation, so a Gateway host skips it.
         if (!builder.Configuration.GetValue("EshopGraftHost", false))
         {
             builder.AddDefaultAuthentication();

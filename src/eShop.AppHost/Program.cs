@@ -84,7 +84,8 @@ var webApp = builder.AddProject<Projects.WebApp>("webapp", launchProfileName)
     .WaitFor(identityApi)
     .WithEnvironment("IdentityUrl", identityEndpoint)
     .WithEnvironment("CATALOG_GRAFT_HOST", "ws://localhost:8000/ws")
-    .WithEnvironment("BASKET_GRAFT_HOST", "ws://localhost:8000/ws");
+    .WithEnvironment("BASKET_GRAFT_HOST", "ws://localhost:8000/ws")
+    .WithEnvironment("ORDERING_GRAFT_HOST", "ws://localhost:8000/ws");
 
 // Set UseFoundry=true to provision Microsoft Foundry for chat and embeddings.
 bool useFoundry = Extensions.IsFoundryEnabled(builder.Configuration);

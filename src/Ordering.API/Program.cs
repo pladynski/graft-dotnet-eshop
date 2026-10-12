@@ -1,4 +1,6 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+﻿using eShop.Ordering.API;
+
+var builder = WebApplication.CreateBuilder(args);
 
 builder.AddServiceDefaults();
 builder.AddApplicationServices();

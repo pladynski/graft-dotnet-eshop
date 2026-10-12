@@ -97,7 +97,7 @@
     <PackageVersion Include="Hypertube.Netcore.Sdk" Version="3.1.18" />
     <PackageVersion Include="graft.nuget.catalog.api_najknh" Version="1.0.0" />
     <PackageVersion Include="graft.nuget.basket.api_o573bl" Version="1.0.0" />
-    <PackageVersion Include="graft.nuget.ordering.api_aro1yz" Version="1.0.0" />
+    <PackageVersion Include="graft.nuget.ordering.api_lio0wl" Version="1.0.0" />
     <PackageVersion Include="graft.nuget.paymentprocessor_bhabr6" Version="1.0.0" />
     <PackageVersion Include="graft.nuget.webhooks.api_lqs8sp" Version="1.0.0" />
   </ItemGroup>

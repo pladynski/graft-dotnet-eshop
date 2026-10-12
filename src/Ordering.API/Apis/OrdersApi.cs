@@ -1,10 +1,14 @@
-﻿using Microsoft.AspNetCore.Http.HttpResults;
+﻿using System.Globalization;
+using Graftcode.Context;
+using Microsoft.AspNetCore.Http.HttpResults;
 using CardType = eShop.Ordering.API.Application.Queries.CardType;
 using Order = eShop.Ordering.API.Application.Queries.Order;
 
+namespace eShop.Ordering.API;
+
 public static class OrdersApi
 {
-    public static RouteGroupBuilder MapOrdersApiV1(this IEndpointRouteBuilder app)
+    internal static RouteGroupBuilder MapOrdersApiV1(this IEndpointRouteBuilder app)
     {
         var api = app.MapGroup("api/orders").HasApiVersion(1.0);
 
@@ -19,7 +23,7 @@ public static class OrdersApi
         return api;
     }
 
-    public static async Task<Results<Ok, BadRequest<string>, ProblemHttpResult>> CancelOrderAsync(
+    internal static async Task<Results<Ok, BadRequest<string>, ProblemHttpResult>> CancelOrderAsync(
         [FromHeader(Name = "x-requestid")] Guid requestId,
         CancelOrderCommand command,
         [AsParameters] OrderServices services)
@@ -48,7 +52,7 @@ public static class OrdersApi
         return TypedResults.Ok();
     }
 
-    public static async Task<Results<Ok, BadRequest<string>, ProblemHttpResult>> ShipOrderAsync(
+    internal static async Task<Results<Ok, BadRequest<string>, ProblemHttpResult>> ShipOrderAsync(
         [FromHeader(Name = "x-requestid")] Guid requestId,
         ShipOrderCommand command,
         [AsParameters] OrderServices services)
@@ -77,7 +81,7 @@ public static class OrdersApi
         return TypedResults.Ok();
     }
 
-    public static async Task<Results<Ok<Order>, NotFound>> GetOrderAsync(int orderId, [AsParameters] OrderServices services)
+    internal static async Task<Results<Ok<Order>, NotFound>> GetOrderAsync(int orderId, [AsParameters] OrderServices services)
     {
         try
         {
@@ -90,20 +94,20 @@ public static class OrdersApi
         }
     }
 
-    public static async Task<Ok<IEnumerable<OrderSummary>>> GetOrdersByUserAsync([AsParameters] OrderServices services)
+    internal static async Task<Ok<IEnumerable<OrderSummary>>> GetOrdersByUserAsync([AsParameters] OrderServices services)
     {
         var userId = services.IdentityService.GetUserIdentity();
         var orders = await services.Queries.GetOrdersFromUserAsync(userId);
         return TypedResults.Ok(orders);
     }
 
-    public static async Task<Ok<IEnumerable<CardType>>> GetCardTypesAsync(IOrderQueries orderQueries)
+    internal static async Task<Ok<IEnumerable<CardType>>> GetCardTypesAsync(IOrderQueries orderQueries)
     {
         var cardTypes = await orderQueries.GetCardTypesAsync();
         return TypedResults.Ok(cardTypes);
     }
 
-    public static async Task<OrderDraftDTO> CreateOrderDraftAsync(CreateOrderDraftCommand command, [AsParameters] OrderServices services)
+    internal static async Task<OrderDraftDTO> CreateOrderDraftAsync(CreateOrderDraftCommand command, [AsParameters] OrderServices services)
     {
         services.Logger.LogInformation(
             "Sending command: {CommandName} - {IdProperty}: {CommandId} ({@Command})",
@@ -115,7 +119,7 @@ public static class OrdersApi
         return await services.Mediator.Send(command);
     }
 
-    public static async Task<Results<Ok, BadRequest<string>>> CreateOrderAsync(
+    internal static async Task<Results<Ok, BadRequest<string>>> CreateOrderAsync(
         [FromHeader(Name = "x-requestid")] Guid requestId,
         CreateOrderRequest request,
         [AsParameters] OrderServices services)
@@ -166,6 +170,362 @@ public static class OrdersApi
             return TypedResults.Ok();
         }
     }
+
+    // Buyer id is the verified token subject. These methods do not accept a buyer id argument.
+    public static OrderList ListOrders()
+    {
+        var authorization = CurrentAuthorization();
+        return Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return new OrderList(0, [], [], [], [], caller.Failure ?? "unauthenticated", null);
+            }
+
+            var queries = provider.GetRequiredService<IOrderQueries>();
+            var rows = (await queries.GetOrdersFromUserAsync(caller.Subject).ConfigureAwait(false)).ToList();
+            return new OrderList(
+                rows.Count,
+                rows.Select(row => row.OrderNumber).ToArray(),
+                rows.Select(row => row.Date.ToString("o")).ToArray(),
+                rows.Select(row => row.Status ?? string.Empty).ToArray(),
+                rows.Select(row => row.Total).ToArray(),
+                "ok",
+                null);
+        });
+    }
+
+    public static OrderHit GetOrder(int orderId)
+    {
+        var authorization = CurrentAuthorization();
+        return Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return Miss(caller.Failure ?? "unauthenticated");
+            }
+
+            var context = provider.GetRequiredService<OrderingContext>();
+            var order = await context.Orders
+                .Include(row => row.Buyer)
+                .Include(row => row.OrderItems)
+                .FirstOrDefaultAsync(row => row.Id == orderId)
+                .ConfigureAwait(false);
+            if (order is null)
+            {
+                return Miss("notFound");
+            }
+
+            if (!string.Equals(order.Buyer?.IdentityGuid, caller.Subject, StringComparison.Ordinal))
+            {
+                return Miss("forbidden");
+            }
+
+            var total = order.OrderItems.Sum(item => item.UnitPrice * item.Units);
+            return new OrderHit(1, order.Id, order.OrderDate.ToString("o"), order.OrderStatus.ToString(), (double)total, "ok", null);
+        });
+    }
+
+    public static OrderMutation CancelOrder(int orderId, string requestId)
+    {
+        var authorization = CurrentAuthorization();
+        return Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return new OrderMutation(caller.Failure ?? "unauthenticated", null, 0);
+            }
+
+            if (!Guid.TryParse(requestId, out var parsed) || parsed == Guid.Empty)
+            {
+                return new OrderMutation("badRequest", "RequestId is missing.", 0);
+            }
+
+            var context = provider.GetRequiredService<OrderingContext>();
+            var order = await context.Orders
+                .Include(row => row.Buyer)
+                .FirstOrDefaultAsync(row => row.Id == orderId)
+                .ConfigureAwait(false);
+            if (order is null)
+            {
+                return new OrderMutation("notFound", null, 0);
+            }
+
+            if (!string.Equals(order.Buyer?.IdentityGuid, caller.Subject, StringComparison.Ordinal))
+            {
+                return new OrderMutation("forbidden", null, 0);
+            }
+
+            var mediator = provider.GetRequiredService<IMediator>();
+            var logger = provider.GetRequiredService<ILogger<OrderServices>>();
+            var command = new IdentifiedCommand<CancelOrderCommand, bool>(new CancelOrderCommand(orderId), parsed);
+            logger.LogInformation("Graft cancel order {OrderId} for {Buyer}", orderId, caller.Subject);
+            var cancelled = await mediator.Send(command).ConfigureAwait(false);
+            return cancelled
+                ? new OrderMutation("cancelled", null, orderId)
+                : new OrderMutation("badRequest", "Cancel order failed to process.", orderId);
+        });
+    }
+
+    public static OrderMutation CreateOrder(
+        string requestId,
+        string userName,
+        string city,
+        string street,
+        string state,
+        string country,
+        string zipCode,
+        string cardNumber,
+        string cardHolderName,
+        string cardExpiration,
+        string cardSecurityNumber,
+        int cardTypeId,
+        int[] productIds,
+        string[] productNames,
+        int[] units,
+        double[] unitPrices)
+    {
+        var authorization = CurrentAuthorization();
+        return Run(async provider =>
+        {
+            var caller = await AuthorizeAsync(provider, authorization).ConfigureAwait(false);
+            if (!caller.IsUser)
+            {
+                return new OrderMutation(caller.Failure ?? "unauthenticated", null, 0);
+            }
+
+            if (!Guid.TryParse(requestId, out var parsed) || parsed == Guid.Empty)
+            {
+                return new OrderMutation("badRequest", "RequestId is missing.", 0);
+            }
+
+            if (!DateTime.TryParse(cardExpiration, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var expiration))
+            {
+                return new OrderMutation("badRequest", "Card expiration is invalid.", 0);
+            }
+
+            var ids = productIds ?? [];
+            var names = productNames ?? [];
+            var quantities = units ?? [];
+            var prices = unitPrices ?? [];
+            var count = Math.Min(Math.Min(ids.Length, names.Length), Math.Min(quantities.Length, prices.Length));
+            if (count == 0 || count != ids.Length || count != names.Length || count != quantities.Length || count != prices.Length)
+            {
+                return new OrderMutation("badRequest", "Order items are missing.", 0);
+            }
+
+            var number = cardNumber ?? string.Empty;
+            var masked = number.Length >= 4
+                ? number.Substring(number.Length - 4).PadLeft(number.Length, 'X')
+                : number;
+            var items = new List<BasketItem>(count);
+            for (var i = 0; i < count; i++)
+            {
+                items.Add(new BasketItem
+                {
+                    Id = Guid.NewGuid().ToString("N"),
+                    ProductId = ids[i],
+                    ProductName = names[i] ?? string.Empty,
+                    UnitPrice = (decimal)prices[i],
+                    Quantity = quantities[i]
+                });
+            }
+
+            var mediator = provider.GetRequiredService<IMediator>();
+            var logger = provider.GetRequiredService<ILogger<OrderServices>>();
+            var create = new CreateOrderCommand(
+                items,
+                caller.Subject,
+                string.IsNullOrWhiteSpace(userName) ? caller.Subject : userName,
+                city,
+                street,
+                state,
+                country,
+                zipCode,
+                masked,
+                cardHolderName,
+                expiration,
+                cardSecurityNumber,
+                cardTypeId);
+            var identified = new IdentifiedCommand<CreateOrderCommand, bool>(create, parsed);
+            logger.LogInformation("Graft create order for {Buyer} request {RequestId}", caller.Subject, parsed);
+            try
+            {
+                var created = await mediator.Send(identified).ConfigureAwait(false);
+                if (!created)
+                {
+                    return new OrderMutation("badRequest", "Create order failed to process.", 0);
+                }
+            }
+            catch (OrderingDomainException ex)
+            {
+                return new OrderMutation("badRequest", ex.Message, 0);
+            }
+
+            var context = provider.GetRequiredService<OrderingContext>();
+            var orderId = await context.Orders
+                .Where(row => row.Buyer.IdentityGuid == caller.Subject)
+                .OrderByDescending(row => row.Id)
+                .Select(row => row.Id)
+                .FirstOrDefaultAsync()
+                .ConfigureAwait(false);
+            return new OrderMutation("created", null, orderId);
+        });
+    }
+
+    private static OrderHit Miss(string status) => new(0, 0, string.Empty, string.Empty, 0, status, null);
+
+    private static string CurrentAuthorization()
+    {
+        var current = RequestContext.Current;
+        if (current is null)
+        {
+            return null;
+        }
+
+        var headers = current.GetHeaders();
+        if (headers is null)
+        {
+            return null;
+        }
+
+        if (headers.TryGetValue("authorization", out var value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        if (headers.TryGetValue("Authorization", out value) && !string.IsNullOrEmpty(value))
+        {
+            return value;
+        }
+
+        return null;
+    }
+
+    private static Task<OrderingCaller> AuthorizeAsync(IServiceProvider provider, string authorization) =>
+        OrderingTokens.ValidateAsync(provider.GetRequiredService<IConfiguration>(), authorization);
+
+    private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
+
+    private static T Run<T>(Func<IServiceProvider, Task<T>> action) =>
+        Task.Run(async () =>
+        {
+            var host = await HostTask.Value.ConfigureAwait(false);
+            await using var scope = host.Services.CreateAsyncScope();
+            return await action(scope.ServiceProvider).ConfigureAwait(false);
+        }).GetAwaiter().GetResult();
+
+    private static async Task<IHost> StartHostAsync()
+    {
+        var builder = Host.CreateApplicationBuilder();
+        builder.Configuration.AddInMemoryCollection(new Dictionary<string, string>
+        {
+            ["EshopGraftHost"] = "true"
+        });
+        builder.AddServiceDefaults();
+        builder.AddApplicationServices();
+
+        if (string.IsNullOrWhiteSpace(builder.Configuration.GetConnectionString("orderingdb")))
+        {
+            throw new InvalidOperationException(
+                "OrdersApi requires ConnectionStrings__orderingdb. Aspire injects this for ordering-api; a standalone Gateway process needs it set.");
+        }
+
+        var host = builder.Build();
+        await host.StartAsync().ConfigureAwait(false);
+        return host;
+    }
+}
+
+// Classes, not positional records. gg 1.4.9 fails the NuGet build for records.
+// Same constructor shapes so these can switch back to records later.
+public sealed class OrderList
+{
+    public OrderList()
+    {
+    }
+
+    public OrderList(int count, int[] orderNumbers, string[] dates, string[] statuses, double[] totals, string status, string detail)
+    {
+        Count = count;
+        OrderNumbers = orderNumbers ?? [];
+        Dates = dates ?? [];
+        Statuses = statuses ?? [];
+        Totals = totals ?? [];
+        Status = status ?? string.Empty;
+        Detail = detail ?? string.Empty;
+    }
+
+    public int Count { get; set; }
+
+    // gg 1.4.9: an empty int[] property throws RuntimeBinderException
+    // (Cannot convert type 'object[]' to 'int[]'). Callers skip these arrays when Count is 0.
+    public int[] OrderNumbers { get; set; } = [];
+
+    public string[] Dates { get; set; } = [];
+
+    public string[] Statuses { get; set; } = [];
+
+    public double[] Totals { get; set; } = [];
+
+    public string Status { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class OrderHit
+{
+    public OrderHit()
+    {
+    }
+
+    public OrderHit(int found, int orderNumber, string date, string orderStatus, double total, string status, string detail)
+    {
+        Found = found;
+        OrderNumber = orderNumber;
+        Date = date ?? string.Empty;
+        OrderStatus = orderStatus ?? string.Empty;
+        Total = total;
+        Status = status ?? string.Empty;
+        Detail = detail ?? string.Empty;
+    }
+
+    public int Found { get; set; }
+
+    public int OrderNumber { get; set; }
+
+    public string Date { get; set; } = string.Empty;
+
+    public string OrderStatus { get; set; } = string.Empty;
+
+    public double Total { get; set; }
+
+    public string Status { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+}
+
+public sealed class OrderMutation
+{
+    public OrderMutation()
+    {
+    }
+
+    public OrderMutation(string status, string detail, int orderNumber)
+    {
+        Status = status ?? string.Empty;
+        Detail = detail ?? string.Empty;
+        OrderNumber = orderNumber;
+    }
+
+    public string Status { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+
+    public int OrderNumber { get; set; }
 }
 
 public record CreateOrderRequest(

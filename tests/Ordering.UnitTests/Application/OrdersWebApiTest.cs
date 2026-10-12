@@ -1,5 +1,6 @@
 ﻿namespace eShop.Ordering.UnitTests.Application;
 
+using eShop.Ordering.API;
 using Microsoft.AspNetCore.Http.HttpResults;
 using eShop.Ordering.API.Application.Queries;
 using Order = eShop.Ordering.API.Application.Queries.Order;
