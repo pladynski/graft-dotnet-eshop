@@ -245,7 +245,13 @@ public class BasketService
 
     private static async Task<IHost> StartHostAsync()
     {
-        var builder = Host.CreateApplicationBuilder();
+        // gg hosts catalog, basket, and ordering in one process. Each module must load its own
+        // appsettings (Identity:Audience is "basket" here and "orders" on OrdersApi).
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            ContentRootPath = ResolveContentRoot(),
+            ApplicationName = "Basket.API"
+        });
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string>
         {
             ["EshopGraftHost"] = "true"
@@ -262,6 +268,17 @@ public class BasketService
         var host = builder.Build();
         await host.StartAsync().ConfigureAwait(false);
         return host;
+    }
+
+    private static string ResolveContentRoot()
+    {
+        var assemblyDir = Path.GetDirectoryName(typeof(BasketService).Assembly.Location);
+        if (!string.IsNullOrEmpty(assemblyDir) && File.Exists(Path.Combine(assemblyDir, "appsettings.json")))
+        {
+            return assemblyDir;
+        }
+
+        return Directory.GetCurrentDirectory();
     }
 
     private sealed class AttachScope : IDisposable

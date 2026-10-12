@@ -420,7 +420,13 @@ public static class OrdersApi
 
     private static async Task<IHost> StartHostAsync()
     {
-        var builder = Host.CreateApplicationBuilder();
+        // Same process can host basket (audience "basket") and orders (audience "orders").
+        // Load this module's appsettings instead of the gateway working directory.
+        var builder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            ContentRootPath = ResolveContentRoot(),
+            ApplicationName = "Ordering.API"
+        });
         builder.Configuration.AddInMemoryCollection(new Dictionary<string, string>
         {
             ["EshopGraftHost"] = "true"
@@ -437,6 +443,17 @@ public static class OrdersApi
         var host = builder.Build();
         await host.StartAsync().ConfigureAwait(false);
         return host;
+    }
+
+    private static string ResolveContentRoot()
+    {
+        var assemblyDir = Path.GetDirectoryName(typeof(OrdersApi).Assembly.Location);
+        if (!string.IsNullOrEmpty(assemblyDir) && File.Exists(Path.Combine(assemblyDir, "appsettings.json")))
+        {
+            return assemblyDir;
+        }
+
+        return Directory.GetCurrentDirectory();
     }
 }
 

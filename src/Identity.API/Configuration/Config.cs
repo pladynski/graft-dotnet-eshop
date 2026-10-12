@@ -7,7 +7,12 @@
         {
             return new List<ApiResource>
             {
-                new ApiResource("orders", "Orders Service"),
+                // Duende puts only matching ApiResource names in the access token aud.
+                // An empty Scopes list leaves "orders" off the token, so ordering grafts reject it.
+                new ApiResource("orders", "Orders Service")
+                {
+                    Scopes = { "orders" }
+                },
                 new ApiResource("basket", "Basket Service")
                 {
                     Scopes = { "basket", "basket.internal" }
