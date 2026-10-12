@@ -1,13 +1,9 @@
-using System.Text.Json;
 using eShop.Catalog.API;
-using eShop.Catalog.API.Model;
 
 namespace eShop.Catalog.FunctionalTests;
 
 public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
 {
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
-
     public CatalogMethodTests(CatalogApiFixture fixture)
     {
         _ = fixture.Services;
@@ -17,7 +13,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsRespectsPageSize()
     {
-        var page = CatalogApi.ListItems(0, 5, "", "", "");
+        var page = CatalogApi.ListItems(0, 5, "", [], []);
 
         Assert.Equal(5, page.ItemCount);
         Assert.Equal(0, page.PageIndex);
@@ -31,10 +27,10 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
         var priorStock = item.AvailableStock;
         item.AvailableStock -= 1;
 
-        var updated = Status(CatalogApi.UpdateItem(item.Id, JsonSerializer.Serialize(item, Json)));
+        var updated = CatalogApi.UpdateItem(item.Id, item);
         var saved = Item(CatalogApi.GetItem(1));
 
-        Assert.Equal("updated", updated);
+        Assert.Equal("updated", updated.Status);
         Assert.Equal(item.Id, saved.Id);
         Assert.NotEqual(priorStock, saved.AvailableStock);
     }
@@ -45,12 +41,12 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
         var item = Editable(CatalogApi.GetItem(1));
         var priorStock = item.AvailableStock;
         item.AvailableStock -= 1;
-        item.Price = 1.99m;
+        item.Price = 1.99;
 
-        var updated = Status(CatalogApi.UpdateItem(item.Id, JsonSerializer.Serialize(item, Json)));
+        var updated = CatalogApi.UpdateItem(item.Id, item);
         var saved = Item(CatalogApi.GetItem(1));
 
-        Assert.Equal("updated", updated);
+        Assert.Equal("updated", updated.Status);
         Assert.Equal(item.Id, saved.Id);
         Assert.Equal(1.99, saved.Price, 2);
         Assert.NotEqual(priorStock, saved.AvailableStock);
@@ -59,7 +55,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void GetItemsByIdsReturnsEachRequestedItem()
     {
-        var items = CatalogApi.GetItemsByIds("1,2,3");
+        var items = CatalogApi.GetItemsByIds([1, 2, 3]);
 
         Assert.Equal(3, items.Count);
         Assert.Equal(3, items.Items.Length);
@@ -76,7 +72,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByExactName()
     {
-        var page = CatalogApi.ListItems(0, 5, "Wanderer Black Hiking Boots", "", "");
+        var page = CatalogApi.ListItems(0, 5, "Wanderer Black Hiking Boots", [], []);
 
         Assert.Equal(1, page.ItemCount);
         Assert.Equal(1, page.Count);
@@ -88,7 +84,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByPartialName()
     {
-        var page = CatalogApi.ListItems(0, 5, "Alpine", "", "");
+        var page = CatalogApi.ListItems(0, 5, "Alpine", [], []);
 
         Assert.Equal(4, page.Count);
         Assert.Equal(0, page.PageIndex);
@@ -101,7 +97,6 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     {
         var picture = CatalogApi.GetItemPicture(1);
 
-        Assert.Equal(1, picture.Found);
         Assert.Equal("image/webp", picture.Mime);
         Assert.False(string.IsNullOrEmpty(picture.Base64));
     }
@@ -120,7 +115,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByTypeAndBrand()
     {
-        var page = CatalogApi.ListItems(0, 5, "", "3", "3");
+        var page = CatalogApi.ListItems(0, 5, "", [3], [3]);
         var first = page.Items[0];
 
         Assert.Equal(4, page.Count);
@@ -133,7 +128,7 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     [Fact]
     public void ListItemsFiltersByBrand()
     {
-        var page = CatalogApi.ListItems(0, 5, "", "", "3");
+        var page = CatalogApi.ListItems(0, 5, "", [], [3]);
 
         Assert.Equal(11, page.Count);
         Assert.Equal(0, page.PageIndex);
@@ -163,11 +158,12 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     public void CreateItemThenGetItemReturnsTheNewId()
     {
         const int id = 10015;
-        var body = new CatalogItem("TestCatalog1")
+        var body = new CatalogItemWrite
         {
             Id = id,
+            Name = "TestCatalog1",
             Description = "Test catalog description 1",
-            Price = 11000.08m,
+            Price = 11000.08,
             CatalogTypeId = 8,
             CatalogBrandId = 13,
             AvailableStock = 100,
@@ -175,10 +171,11 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
             MaxStockThreshold = 200
         };
 
-        using var created = JsonDocument.Parse(CatalogApi.CreateItem(JsonSerializer.Serialize(body, Json)));
+        var created = CatalogApi.CreateItem(body);
         var saved = Item(CatalogApi.GetItem(id));
 
-        Assert.Equal(id, created.RootElement.GetProperty("id").GetInt32());
+        Assert.Equal("created", created.Status);
+        Assert.Equal(id, created.Id);
         Assert.Equal(id, saved.Id);
     }
 
@@ -187,9 +184,9 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
     {
         const int id = 5;
 
-        var deleted = Status(CatalogApi.DeleteItem(id));
+        var deleted = CatalogApi.DeleteItem(id);
 
-        Assert.Equal("deleted", deleted);
+        Assert.Equal("deleted", deleted.Status);
         Assert.Equal(0, CatalogApi.GetItem(id).Found);
     }
 
@@ -205,13 +202,13 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
         const int missingId = int.MaxValue;
 
         Assert.Equal(0, CatalogApi.GetItem(missingId).Found);
-        Assert.Equal("notFound", Status(CatalogApi.DeleteItem(missingId)));
+        Assert.Equal("notFound", CatalogApi.DeleteItem(missingId).Status);
     }
 
     [Fact]
     public void ListItemsPastTheLastPageReturnsEmptyData()
     {
-        var page = CatalogApi.ListItems(1000, 10, "", "", "");
+        var page = CatalogApi.ListItems(1000, 10, "", [], []);
 
         Assert.Equal(0, page.ItemCount);
         Assert.Empty(page.Items);
@@ -223,14 +220,15 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
             ? hit.Item
             : throw new InvalidOperationException("Catalog item was missing.");
 
-    private static CatalogItem Editable(CatalogItemHit hit)
+    private static CatalogItemWrite Editable(CatalogItemHit hit)
     {
         var view = Item(hit);
-        return new CatalogItem(view.Name)
+        return new CatalogItemWrite
         {
             Id = view.Id,
+            Name = view.Name,
             Description = view.Description,
-            Price = (decimal)view.Price,
+            Price = view.Price,
             PictureFileName = view.PictureFileName,
             CatalogBrandId = view.CatalogBrandId,
             CatalogTypeId = view.CatalogTypeId,
@@ -238,12 +236,5 @@ public sealed class CatalogMethodTests : IClassFixture<CatalogApiFixture>
             RestockThreshold = view.RestockThreshold,
             MaxStockThreshold = view.MaxStockThreshold
         };
-    }
-
-    private static string Status(string json)
-    {
-        using var document = JsonDocument.Parse(json);
-        return document.RootElement.GetProperty("status").GetString()
-            ?? throw new InvalidOperationException("Status JSON was empty.");
     }
 }

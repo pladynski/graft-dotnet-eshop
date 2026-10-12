@@ -65,6 +65,8 @@ public class BasketService(IHttpContextAccessor httpContextAccessor)
 
     private static IReadOnlyCollection<BasketQuantity> Lines(BasketResult result)
     {
+        // gg 1.4.9: an empty int[] property throws RuntimeBinderException
+        // (Cannot convert type 'object[]' to 'int[]'). Do not read the arrays when Count is 0.
         if (result is null || result.Count <= 0)
         {
             return [];

@@ -31,7 +31,8 @@ public class CatalogService : ICatalogService
     public Task<CatalogItem?> GetCatalogItem(int id)
     {
         var hit = CatalogApi.GetItem(id);
-        if (hit is null || hit.Found == 0)
+        // gg 1.4.9 null complex return: do not read Item when Found is 0.
+        if (hit.Found == 0)
         {
             return Task.FromResult<CatalogItem?>(null);
         }
@@ -40,20 +41,13 @@ public class CatalogService : ICatalogService
     }
 
     public Task<CatalogResult> GetCatalogItems(int pageIndex, int pageSize, int[]? brands, int[]? types) =>
-        Task.FromResult(Map(CatalogApi.ListItems(pageIndex, pageSize, string.Empty, Join(types), Join(brands))));
+        Task.FromResult(Map(CatalogApi.ListItems(pageIndex, pageSize, string.Empty, types ?? [], brands ?? [])));
 
     public Task<List<CatalogItem>> GetCatalogItems(IEnumerable<int> ids)
     {
-        var requested = ids?.ToArray() ?? [];
-        if (requested.Length == 0)
-        {
-            return Task.FromResult(new List<CatalogItem>());
-        }
-
-        var set = CatalogApi.GetItemsByIds(Join(requested));
-        var items = set is null || set.Count == 0
-            ? new List<CatalogItem>()
-            : set.Items.Select(Map).ToList();
+        var set = CatalogApi.GetItemsByIds(ids?.ToArray() ?? []);
+        // gg 1.4.9 empty complex array: do not read Items when Count is 0.
+        var items = set.Count == 0 ? new List<CatalogItem>() : set.Items.Select(Map).ToList();
         return Task.FromResult(items);
     }
 
@@ -63,7 +57,8 @@ public class CatalogService : ICatalogService
     public Task<IEnumerable<CatalogBrand>> GetBrands()
     {
         var brands = CatalogApi.ListBrands();
-        IEnumerable<CatalogBrand> items = brands is null || brands.Count == 0
+        // gg 1.4.9 empty complex array: do not read Items when Count is 0.
+        IEnumerable<CatalogBrand> items = brands.Count == 0
             ? []
             : brands.Items.Select(brand => new CatalogBrand(brand.Id, brand.Brand ?? string.Empty));
         return Task.FromResult(items);
@@ -72,19 +67,20 @@ public class CatalogService : ICatalogService
     public Task<IEnumerable<CatalogItemType>> GetTypes()
     {
         var types = CatalogApi.ListTypes();
-        IEnumerable<CatalogItemType> items = types is null || types.Count == 0
+        // gg 1.4.9 empty complex array: do not read Items when Count is 0.
+        IEnumerable<CatalogItemType> items = types.Count == 0
             ? []
             : types.Items.Select(type => new CatalogItemType(type.Id, type.Type ?? string.Empty));
         return Task.FromResult(items);
     }
 
     public Task<CatalogFacets> GetCatalogFacets(int[]? brands, int[]? types) =>
-        Task.FromResult(Map(CatalogApi.GetFacets(Join(types), Join(brands))));
+        Task.FromResult(Map(CatalogApi.GetFacets(types ?? [], brands ?? [])));
 
     public (string Mime, byte[] Bytes)? GetItemPicture(int id)
     {
         var picture = CatalogApi.GetItemPicture(id);
-        if (picture is null || picture.Found == 0 || string.IsNullOrEmpty(picture.Base64))
+        if (string.IsNullOrEmpty(picture.Base64))
         {
             return null;
         }
@@ -135,6 +131,7 @@ public class CatalogService : ICatalogService
             return new CatalogResult(0, 0, 0, []);
         }
 
+        // gg 1.4.9 empty complex array: do not read Items when ItemCount is 0.
         var data = page.ItemCount == 0
             ? new List<CatalogItem>()
             : page.Items.Select(Map).ToList();
@@ -148,6 +145,7 @@ public class CatalogService : ICatalogService
             return new CatalogFacets([], [], 0, 0);
         }
 
+        // gg 1.4.9 empty complex array: do not read the count arrays when the matching count is 0.
         var brands = facets.BrandCount == 0
             ? Array.Empty<CatalogFacetCount>()
             : facets.BrandCounts.Select(count => new CatalogFacetCount(count.Id, count.Count)).ToArray();
@@ -173,6 +171,4 @@ public class CatalogService : ICatalogService
             new CatalogItemType(type.Id == 0 ? item.CatalogTypeId : type.Id, type.Type ?? string.Empty));
     }
 
-    private static string Join(IEnumerable<int>? ids) =>
-        ids is null ? string.Empty : string.Join(',', ids);
 }

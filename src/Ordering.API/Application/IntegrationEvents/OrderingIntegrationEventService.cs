@@ -101,6 +101,8 @@ public class OrderingIntegrationEventService(
 
         if (string.Equals(decision.Result, "rejected", StringComparison.OrdinalIgnoreCase))
         {
+            // Confirmed decisions carry an empty ProductIds property. gg 1.4.9 throws
+            // RuntimeBinderException on that getter, so only the rejected branch reads it.
             await OrderStockRejectedIntegrationEventHandler.Apply(scope.ServiceProvider, orderId, decision.ProductIds ?? []);
             return;
         }

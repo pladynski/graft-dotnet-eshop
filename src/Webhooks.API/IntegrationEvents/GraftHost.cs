@@ -67,6 +67,33 @@ internal static class GraftHost
     }
 }
 
-public sealed record StockRequest(int[] ProductIds, int[] Units);
+public sealed class StockRequest
+{
+    public StockRequest()
+    {
+    }
 
-public sealed record GraftStatus(string Status);
+    public StockRequest(int[] productIds, int[] units)
+    {
+        ProductIds = productIds ?? [];
+        Units = units ?? [];
+    }
+
+    public int[] ProductIds { get; set; } = [];
+
+    public int[] Units { get; set; } = [];
+}
+
+public sealed class GraftStatus
+{
+    public GraftStatus()
+    {
+    }
+
+    public GraftStatus(string status)
+    {
+        Status = status ?? string.Empty;
+    }
+
+    public string Status { get; set; } = string.Empty;
+}

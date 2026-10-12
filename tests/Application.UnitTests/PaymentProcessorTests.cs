@@ -22,6 +22,6 @@ public class PaymentProcessorTests
 
         var outcome = await handler.Handle(new OrderStatusChangedToStockConfirmedIntegrationEvent(42));
 
-        Assert.AreEqual(paymentSucceeded ? "succeeded" : "failed", outcome);
+        Assert.AreEqual(paymentSucceeded ? "succeeded" : "failed", outcome.Outcome);
     }
 }

@@ -14,7 +14,7 @@ public class OrderStatusChangedToStockConfirmedIntegrationEventHandler
         this.logger = logger;
     }
 
-    public static string OnStockConfirmed(int orderId) =>
+    public static PaymentResult OnStockConfirmed(int orderId) =>
         Task.Run(async () =>
         {
             var host = await HostTask.Value.ConfigureAwait(false);
@@ -26,7 +26,9 @@ public class OrderStatusChangedToStockConfirmedIntegrationEventHandler
             return await handler.Handle(new OrderStatusChangedToStockConfirmedIntegrationEvent(orderId)).ConfigureAwait(false);
         }).GetAwaiter().GetResult();
 
-    public Task<string> Handle(OrderStatusChangedToStockConfirmedIntegrationEvent @event)
+    // Internal so the graft surface is OnStockConfirmed + PaymentResult.
+    // A public Handle that takes the integration-event record makes the gg 1.4.9 NuGet build fail.
+    internal Task<PaymentResult> Handle(OrderStatusChangedToStockConfirmedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 
@@ -40,7 +42,7 @@ public class OrderStatusChangedToStockConfirmedIntegrationEventHandler
 
         logger.LogInformation("Payment outcome {Outcome} for order {OrderId}", outcome, @event.OrderId);
 
-        return Task.FromResult(outcome);
+        return Task.FromResult(new PaymentResult(outcome));
     }
 
     private static async Task<IHost> StartHostAsync()
@@ -90,4 +92,18 @@ public class OrderStatusChangedToStockConfirmedIntegrationEventHandler
 
         return baseDir;
     }
+}
+
+public sealed class PaymentResult
+{
+    public PaymentResult()
+    {
+    }
+
+    public PaymentResult(string outcome)
+    {
+        Outcome = outcome ?? string.Empty;
+    }
+
+    public string Outcome { get; set; } = string.Empty;
 }

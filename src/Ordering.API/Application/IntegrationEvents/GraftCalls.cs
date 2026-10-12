@@ -45,7 +45,7 @@ internal static class GraftCalls
     public static string Payment(int orderId)
     {
         Ensure();
-        return PaymentGraft.OnStockConfirmed(orderId);
+        return PaymentGraft.OnStockConfirmed(orderId).Outcome;
     }
 
     public static void OrderPaid(int orderId, IEnumerable<OrderStockItem> items)

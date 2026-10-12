@@ -1,6 +1,7 @@
 ﻿namespace eShop.Ordering.API.Application.IntegrationEvents.EventHandling;
 
-public class OrderPaymentSucceededIntegrationEventHandler : IIntegrationEventHandler<OrderPaymentSucceededIntegrationEvent>
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class OrderPaymentSucceededIntegrationEventHandler
 {
     private readonly IMediator mediator;
     private readonly ILogger<OrderPaymentSucceededIntegrationEventHandler> logger;
@@ -21,10 +22,9 @@ public class OrderPaymentSucceededIntegrationEventHandler : IIntegrationEventHan
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        ((IIntegrationEventHandler<OrderPaymentSucceededIntegrationEvent>)Create(provider))
-            .Handle(new OrderPaymentSucceededIntegrationEvent(orderId));
+        Create(provider).Handle(new OrderPaymentSucceededIntegrationEvent(orderId));
 
-    async Task IIntegrationEventHandler<OrderPaymentSucceededIntegrationEvent>.Handle(OrderPaymentSucceededIntegrationEvent @event)
+    private async Task Handle(OrderPaymentSucceededIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

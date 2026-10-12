@@ -26,8 +26,8 @@
 
   <ItemGroup>
     <PackageReference Include="graft.nuget.basket.api_o573bl" />
-    <PackageReference Include="graft.nuget.catalog.api_asj4vd" />
-    <PackageReference Include="graft.nuget.paymentprocessor_2hchbx" />
+    <PackageReference Include="graft.nuget.catalog.api_najknh" />
+    <PackageReference Include="graft.nuget.paymentprocessor_bhabr6" />
     <PackageReference Include="graft.nuget.webhooks.api_lqs8sp" />
     <PackageReference Include="Asp.Versioning.Http" />
     <PackageReference Include="Aspire.Npgsql.EntityFrameworkCore.PostgreSQL" />

@@ -1,6 +1,7 @@
 ﻿namespace eShop.Ordering.API.Application.IntegrationEvents.EventHandling;
 
-public class GracePeriodConfirmedIntegrationEventHandler : IIntegrationEventHandler<GracePeriodConfirmedIntegrationEvent>
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class GracePeriodConfirmedIntegrationEventHandler
 {
     private readonly IMediator mediator;
     private readonly ILogger<GracePeriodConfirmedIntegrationEventHandler> logger;
@@ -22,8 +23,7 @@ public class GracePeriodConfirmedIntegrationEventHandler : IIntegrationEventHand
         });
 
     internal static Task Apply(IServiceProvider provider, int orderId) =>
-        ((IIntegrationEventHandler<GracePeriodConfirmedIntegrationEvent>)Create(provider))
-            .Handle(new GracePeriodConfirmedIntegrationEvent(orderId));
+        Create(provider).Handle(new GracePeriodConfirmedIntegrationEvent(orderId));
 
     /// <summary>
     /// Event handler which confirms that the grace period
@@ -33,7 +33,7 @@ public class GracePeriodConfirmedIntegrationEventHandler : IIntegrationEventHand
     /// <param name="event">       
     /// </param>
     /// <returns></returns>
-    async Task IIntegrationEventHandler<GracePeriodConfirmedIntegrationEvent>.Handle(GracePeriodConfirmedIntegrationEvent @event)
+    private async Task Handle(GracePeriodConfirmedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

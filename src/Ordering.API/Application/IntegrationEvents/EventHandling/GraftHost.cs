@@ -67,4 +67,16 @@ internal static class GraftHost
     }
 }
 
-public sealed record GraftStatus(string Status);
+public sealed class GraftStatus
+{
+    public GraftStatus()
+    {
+    }
+
+    public GraftStatus(string status)
+    {
+        Status = status ?? string.Empty;
+    }
+
+    public string Status { get; set; } = string.Empty;
+}

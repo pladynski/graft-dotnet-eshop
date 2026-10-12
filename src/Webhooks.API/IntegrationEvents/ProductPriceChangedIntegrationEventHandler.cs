@@ -1,6 +1,7 @@
 ﻿namespace Webhooks.API.IntegrationEvents;
 
-public class ProductPriceChangedIntegrationEventHandler : IIntegrationEventHandler<ProductPriceChangedIntegrationEvent>
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class ProductPriceChangedIntegrationEventHandler
 {
     private ProductPriceChangedIntegrationEventHandler()
     {
@@ -9,12 +10,11 @@ public class ProductPriceChangedIntegrationEventHandler : IIntegrationEventHandl
     public static GraftStatus OnProductPriceChanged(int productId, double newPrice, double oldPrice) =>
         GraftHost.Block(async _ =>
         {
-            var handler = (IIntegrationEventHandler<ProductPriceChangedIntegrationEvent>)new ProductPriceChangedIntegrationEventHandler();
-            await handler.Handle(new ProductPriceChangedIntegrationEvent(productId, (decimal)newPrice, (decimal)oldPrice)).ConfigureAwait(false);
+            await new ProductPriceChangedIntegrationEventHandler().Handle(new ProductPriceChangedIntegrationEvent(productId, (decimal)newPrice, (decimal)oldPrice)).ConfigureAwait(false);
             return new GraftStatus("ok");
         });
 
-    Task IIntegrationEventHandler<ProductPriceChangedIntegrationEvent>.Handle(ProductPriceChangedIntegrationEvent @event)
+    private Task Handle(ProductPriceChangedIntegrationEvent @event)
     {
         return Task.CompletedTask;
     }

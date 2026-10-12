@@ -1,5 +1,4 @@
 // Graftcode catalog slice — original CatalogApi handlers are the public methods.
-using System.Text.Json;
 using Microsoft.Extensions.FileProviders;
 using Pgvector.EntityFrameworkCore;
 
@@ -7,12 +6,13 @@ namespace eShop.Catalog.API;
 
 /// <summary>
 /// Catalog operations hosted by Graftcode Gateway.
-/// Storefront reads return classes. A page's Items is CatalogItemView[].
-/// Callers skip an array when its count is 0; an empty complex array does not round-trip.
-/// Create, update, and delete still use JSON. There is no REST route table.
+/// Storefront reads and writes are classes. A page's Items is CatalogItemView[].
+/// gg 1.4.9 still throws when a client reads an empty complex array, a null complex
+/// value, or an empty int[] property. Those shapes use Found or a count and the
+/// caller does not touch the failing member. There is no REST route table.
 /// </summary>
 public static class CatalogApi
-{    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+{
     private static readonly Lazy<Task<IHost>> HostTask = new(StartHostAsync);
     private static IServiceProvider? AttachedServices;
 
@@ -35,17 +35,17 @@ public static class CatalogApi
                 : new CatalogItemHit { Found = 1, Item = ToView(item) };
         });
 
-    public static CatalogPage ListItems(int pageIndex, int pageSize, string name, string typeIds, string brandIds) =>
+    public static CatalogPage ListItems(int pageIndex, int pageSize, string name, int[] typeIds, int[] brandIds) =>
         Block(async services => ToPage(await ListItemsAsync(
             services,
             pageIndex,
             pageSize,
             EmptyToNull(name),
-            ParseIds(typeIds),
-            ParseIds(brandIds)).ConfigureAwait(false)));
+            typeIds,
+            brandIds).ConfigureAwait(false)));
 
-    public static CatalogItemSet GetItemsByIds(string ids) =>
-        Block(async services => ToSet(await FindItemsByIdsAsync(services, ParseIds(ids) ?? []).ConfigureAwait(false)));
+    public static CatalogItemSet GetItemsByIds(int[] ids) =>
+        Block(async services => ToSet(await FindItemsByIdsAsync(services, ids ?? []).ConfigureAwait(false)));
 
     public static CatalogPage Search(int pageIndex, int pageSize, string text) =>
         Block(async services => ToPage(await SearchAsync(services, pageIndex, pageSize, text ?? string.Empty).ConfigureAwait(false)));
@@ -56,41 +56,43 @@ public static class CatalogApi
     public static CatalogTypeList ListTypes() =>
         Block(async services => ToTypeList(await ListTypesAsync(services.Context).ConfigureAwait(false)));
 
-    public static CatalogFacetSet GetFacets(string typeIds, string brandIds) =>
-        Block(async services => ToFacetSet(await GetFacetsAsync(services, ParseIds(typeIds), ParseIds(brandIds)).ConfigureAwait(false)));
+    public static CatalogFacetSet GetFacets(int[] typeIds, int[] brandIds) =>
+        Block(async services => ToFacetSet(await GetFacetsAsync(services, typeIds, brandIds).ConfigureAwait(false)));
 
-    public static string CreateItem(string itemJson) =>
+    public static CatalogMutation CreateItem(CatalogItemWrite item) =>
         Block(async services =>
         {
-            if (!TryReadItem(itemJson, out var product, out var error))
+            if (!TryReadItem(item, out var product, out var error))
             {
-                return ToJson(new ErrorPayload("badRequest", error));
+                return new CatalogMutation { Status = "badRequest", Detail = error };
             }
 
             var id = await CreateItemAsync(services, product).ConfigureAwait(false);
-            return ToJson(new CreatedPayload(id));
+            return new CatalogMutation { Status = "created", Id = id };
         });
 
-    public static string UpdateItem(int id, string itemJson) =>
+    public static CatalogMutation UpdateItem(int id, CatalogItemWrite item) =>
         Block(async services =>
         {
-            if (!TryReadItem(itemJson, out var product, out var error))
+            if (!TryReadItem(item, out var product, out var error))
             {
-                return ToJson(new ErrorPayload("badRequest", error));
+                return new CatalogMutation { Status = "badRequest", Detail = error };
             }
 
             var result = await UpdateItemAsync(services, id, product).ConfigureAwait(false);
             return result.StatusCode switch
             {
-                StatusCodes.Status400BadRequest => ToJson(new ErrorPayload("badRequest", result.Detail ?? string.Empty)),
-                StatusCodes.Status404NotFound => ToJson(new ErrorPayload("notFound", result.Detail ?? string.Empty)),
-                _ => ToJson(new StatusPayload("updated"))
+                StatusCodes.Status400BadRequest => new CatalogMutation { Status = "badRequest", Detail = result.Detail ?? string.Empty },
+                StatusCodes.Status404NotFound => new CatalogMutation { Status = "notFound", Detail = result.Detail ?? string.Empty },
+                _ => new CatalogMutation { Status = "updated", Id = id }
             };
         });
 
-    public static string DeleteItem(int id) =>
-        Block(async services => ToJson(new StatusPayload(
-            await DeleteItemAsync(services, id).ConfigureAwait(false) ? "deleted" : "notFound")));
+    public static CatalogMutation DeleteItem(int id) =>
+        Block(async services => new CatalogMutation
+        {
+            Status = await DeleteItemAsync(services, id).ConfigureAwait(false) ? "deleted" : "notFound"
+        });
 
     public static CatalogPicture GetItemPicture(int id) =>
         Block(async (provider, services) =>
@@ -99,13 +101,12 @@ public static class CatalogApi
             var picture = await TryGetPictureAsync(services.Context, root, id).ConfigureAwait(false);
             if (picture is null || !File.Exists(picture.Value.Path))
             {
-                return new CatalogPicture { Found = 0 };
+                return new CatalogPicture();
             }
 
             var bytes = await File.ReadAllBytesAsync(picture.Value.Path).ConfigureAwait(false);
             return new CatalogPicture
             {
-                Found = 1,
                 Mime = picture.Value.Mime,
                 Base64 = Convert.ToBase64String(bytes)
             };
@@ -469,6 +470,8 @@ public static class CatalogApi
         AvailableStock = item.AvailableStock,
         RestockThreshold = item.RestockThreshold,
         MaxStockThreshold = item.MaxStockThreshold,
+        // gg 1.4.9: a null nested Brand/Type throws ArgumentNullException (parameter 'key')
+        // in ComplexTypeResolver.Register when the client reads it. Always send an object.
         Brand = new CatalogBrandView
         {
             Id = item.CatalogBrandId,
@@ -536,58 +539,39 @@ public static class CatalogApi
         };
     }
 
-    private static string ToJson<T>(T value) => JsonSerializer.Serialize(value, JsonOptions);
-
-    private static bool TryReadItem(string itemJson, out CatalogItem product, out string error)
+    private static bool TryReadItem(CatalogItemWrite item, out CatalogItem product, out string error)
     {
         product = null!;
         error = string.Empty;
-        if (string.IsNullOrWhiteSpace(itemJson))
+        if (item is null)
         {
             error = "Item body is required.";
             return false;
         }
 
-        try
+        if (string.IsNullOrWhiteSpace(item.Name))
         {
-            var parsed = JsonSerializer.Deserialize<CatalogItem>(itemJson, JsonOptions);
-            if (parsed is null || string.IsNullOrWhiteSpace(parsed.Name))
-            {
-                error = "Item name is required.";
-                return false;
-            }
-
-            product = parsed;
-            return true;
-        }
-        catch (JsonException ex)
-        {
-            error = ex.Message;
+            error = "Item name is required.";
             return false;
         }
+
+        product = new CatalogItem(item.Name)
+        {
+            Id = item.Id,
+            Description = item.Description,
+            Price = (decimal)item.Price,
+            PictureFileName = string.IsNullOrEmpty(item.PictureFileName) ? null : item.PictureFileName,
+            CatalogBrandId = item.CatalogBrandId,
+            CatalogTypeId = item.CatalogTypeId,
+            AvailableStock = item.AvailableStock,
+            RestockThreshold = item.RestockThreshold,
+            MaxStockThreshold = item.MaxStockThreshold
+        };
+        return true;
     }
 
     private static string? EmptyToNull(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value;
-
-    internal static int[]? ParseIds(string? csv)
-    {
-        if (string.IsNullOrWhiteSpace(csv))
-        {
-            return null;
-        }
-
-        var ids = new List<int>();
-        foreach (var part in csv.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-        {
-            if (int.TryParse(part, out var id))
-            {
-                ids.Add(id);
-            }
-        }
-
-        return ids.Count == 0 ? null : ids.ToArray();
-    }
 
     private static string MimeFromExtension(string extension) => extension switch
     {
@@ -602,10 +586,6 @@ public static class CatalogApi
         ".webp" => "image/webp",
         _ => "application/octet-stream",
     };
-
-    private sealed record ErrorPayload(string Status, string Detail);
-    private sealed record CreatedPayload(int Id);
-    private sealed record StatusPayload(string Status);
 
     private sealed class CatalogHostEnvironment(IHostEnvironment inner) : IWebHostEnvironment
     {
@@ -649,6 +629,9 @@ public sealed class StockDecision
 
     public string Result { get; set; } = string.Empty;
 
+    // gg 1.4.9: an empty int[] property throws RuntimeBinderException
+    // (Cannot convert type 'object[]' to 'int[]') in the generated getter.
+    // Callers read ProductIds only when Result is rejected and the array is non-empty.
     public int[] ProductIds { get; set; } = [];
 }
 
@@ -709,6 +692,8 @@ public sealed class CatalogItemView
 
 public sealed class CatalogItemHit
 {
+    // gg 1.4.9: a null CatalogItemView return throws ArgumentNullException (parameter 'key')
+    // in Hypertube.Netcore.Sdk.Tools.ComplexTypeResolver.Register. Found == 0 means missing.
     public int Found { get; set; }
 
     public CatalogItemView? Item { get; set; }
@@ -722,6 +707,8 @@ public sealed class CatalogPage
 
     public int Count { get; set; }
 
+    // gg 1.4.9: Item[] get_Items throws ArgumentNullException (parameter 'key') in
+    // ComplexTypeResolver.Register when the array is empty. Callers skip Items when this is 0.
     public int ItemCount { get; set; }
 
     public CatalogItemView[] Items { get; set; } = [];
@@ -729,6 +716,7 @@ public sealed class CatalogPage
 
 public sealed class CatalogItemSet
 {
+    // Same empty-array failure as CatalogPage.ItemCount. Skip Items when Count is 0.
     public int Count { get; set; }
 
     public CatalogItemView[] Items { get; set; } = [];
@@ -736,6 +724,7 @@ public sealed class CatalogItemSet
 
 public sealed class CatalogBrandList
 {
+    // Same empty-array failure as CatalogPage.ItemCount. Skip Items when Count is 0.
     public int Count { get; set; }
 
     public CatalogBrandView[] Items { get; set; } = [];
@@ -743,6 +732,7 @@ public sealed class CatalogBrandList
 
 public sealed class CatalogTypeList
 {
+    // Same empty-array failure as CatalogPage.ItemCount. Skip Items when Count is 0.
     public int Count { get; set; }
 
     public CatalogTypeView[] Items { get; set; } = [];
@@ -761,6 +751,7 @@ public sealed class CatalogFacetSet
 
     public int TypeTotal { get; set; }
 
+    // Same empty-array failure as CatalogPage.ItemCount. Skip BrandCounts/TypeCounts when these are 0.
     public int BrandCount { get; set; }
 
     public int TypeCount { get; set; }
@@ -772,9 +763,39 @@ public sealed class CatalogFacetSet
 
 public sealed class CatalogPicture
 {
-    public int Found { get; set; }
-
     public string Mime { get; set; } = string.Empty;
 
     public string Base64 { get; set; } = string.Empty;
+}
+
+public sealed class CatalogItemWrite
+{
+    public int Id { get; set; }
+
+    public string Name { get; set; } = string.Empty;
+
+    public string Description { get; set; } = string.Empty;
+
+    public double Price { get; set; }
+
+    public string PictureFileName { get; set; } = string.Empty;
+
+    public int CatalogBrandId { get; set; }
+
+    public int CatalogTypeId { get; set; }
+
+    public int AvailableStock { get; set; }
+
+    public int RestockThreshold { get; set; }
+
+    public int MaxStockThreshold { get; set; }
+}
+
+public sealed class CatalogMutation
+{
+    public string Status { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+
+    public int Id { get; set; }
 }

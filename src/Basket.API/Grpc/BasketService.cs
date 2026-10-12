@@ -275,4 +275,30 @@ public class BasketService
     }
 }
 
-public sealed record BasketResult(int Count, int[] ProductIds, int[] Quantities, string Status, string Detail);
+public sealed class BasketResult
+{
+    public BasketResult()
+    {
+    }
+
+    public BasketResult(int count, int[] productIds, int[] quantities, string status, string detail)
+    {
+        Count = count;
+        ProductIds = productIds ?? [];
+        Quantities = quantities ?? [];
+        Status = status ?? string.Empty;
+        Detail = detail ?? string.Empty;
+    }
+
+    public int Count { get; set; }
+
+    // gg 1.4.9: an empty int[] property throws RuntimeBinderException
+    // (Cannot convert type 'object[]' to 'int[]'). Callers skip these when Count is 0.
+    public int[] ProductIds { get; set; } = [];
+
+    public int[] Quantities { get; set; } = [];
+
+    public string Status { get; set; } = string.Empty;
+
+    public string Detail { get; set; } = string.Empty;
+}

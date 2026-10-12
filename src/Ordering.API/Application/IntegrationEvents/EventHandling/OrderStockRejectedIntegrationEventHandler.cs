@@ -1,6 +1,7 @@
 ﻿namespace eShop.Ordering.API.Application.IntegrationEvents.EventHandling;
 
-public class OrderStockRejectedIntegrationEventHandler : IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class OrderStockRejectedIntegrationEventHandler
 {
     private readonly IMediator mediator;
     private readonly ILogger<OrderStockRejectedIntegrationEventHandler> logger;
@@ -23,11 +24,10 @@ public class OrderStockRejectedIntegrationEventHandler : IIntegrationEventHandle
     internal static Task Apply(IServiceProvider provider, int orderId, IEnumerable<int> productIds)
     {
         var items = productIds.Select(id => new ConfirmedOrderStockItem(id, false)).ToList();
-        return ((IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>)Create(provider))
-            .Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
+        return Create(provider).Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
     }
 
-    async Task IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>.Handle(OrderStockRejectedIntegrationEvent @event)
+    private async Task Handle(OrderStockRejectedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 

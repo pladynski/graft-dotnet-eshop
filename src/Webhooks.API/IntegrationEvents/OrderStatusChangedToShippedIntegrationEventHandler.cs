@@ -1,6 +1,7 @@
 ﻿namespace Webhooks.API.IntegrationEvents;
 
-public class OrderStatusChangedToShippedIntegrationEventHandler : IIntegrationEventHandler<OrderStatusChangedToShippedIntegrationEvent>
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class OrderStatusChangedToShippedIntegrationEventHandler
 {
     private readonly IWebhooksRetriever retriever;
     private readonly IWebhooksSender sender;
@@ -19,12 +20,11 @@ public class OrderStatusChangedToShippedIntegrationEventHandler : IIntegrationEv
     public static GraftStatus OnOrderShipped(int orderId, string orderStatus, string buyerName) =>
         GraftHost.Block(async provider =>
         {
-            var handler = (IIntegrationEventHandler<OrderStatusChangedToShippedIntegrationEvent>)Create(provider);
-            await handler.Handle(new OrderStatusChangedToShippedIntegrationEvent(orderId, orderStatus ?? string.Empty, buyerName ?? string.Empty)).ConfigureAwait(false);
+            await Create(provider).Handle(new OrderStatusChangedToShippedIntegrationEvent(orderId, orderStatus ?? string.Empty, buyerName ?? string.Empty)).ConfigureAwait(false);
             return new GraftStatus("ok");
         });
 
-    async Task IIntegrationEventHandler<OrderStatusChangedToShippedIntegrationEvent>.Handle(OrderStatusChangedToShippedIntegrationEvent @event)
+    private async Task Handle(OrderStatusChangedToShippedIntegrationEvent @event)
     {
         var subscriptions = await retriever.GetSubscriptionsOfType(WebhookType.OrderShipped);
 
