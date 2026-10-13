@@ -224,7 +224,26 @@ public static class OrdersApi
             }
 
             var total = order.OrderItems.Sum(item => item.UnitPrice * item.Units);
-            return new OrderHit(1, order.Id, order.OrderDate.ToString("o"), order.OrderStatus.ToString(), (double)total, "ok", null);
+            var hit = new OrderHit(1, order.Id, order.OrderDate.ToString("o"), order.OrderStatus.ToString(), (double)total, "ok", null);
+            // Same fields the HTTP order document returned to MAUI. Callers skip the arrays when ItemCount is 0.
+            var address = order.Address;
+            hit.Street = address?.Street ?? string.Empty;
+            hit.City = address?.City ?? string.Empty;
+            hit.State = address?.State ?? string.Empty;
+            hit.Country = address?.Country ?? string.Empty;
+            hit.ZipCode = address?.ZipCode ?? string.Empty;
+            var items = order.OrderItems?.ToList() ?? [];
+            hit.ItemCount = items.Count;
+            if (items.Count > 0)
+            {
+                hit.ProductIds = items.Select(item => item.ProductId).ToArray();
+                hit.ProductNames = items.Select(item => item.ProductName ?? string.Empty).ToArray();
+                hit.Units = items.Select(item => item.Units).ToArray();
+                hit.UnitPrices = items.Select(item => (double)item.UnitPrice).ToArray();
+                hit.PictureUrls = items.Select(item => item.PictureUrl ?? string.Empty).ToArray();
+            }
+
+            return hit;
         });
     }
 
@@ -523,6 +542,29 @@ public sealed class OrderHit
     public string Status { get; set; } = string.Empty;
 
     public string Detail { get; set; } = string.Empty;
+
+    public string Street { get; set; } = string.Empty;
+
+    public string City { get; set; } = string.Empty;
+
+    public string State { get; set; } = string.Empty;
+
+    public string Country { get; set; } = string.Empty;
+
+    public string ZipCode { get; set; } = string.Empty;
+
+    public int ItemCount { get; set; }
+
+    // gg 1.4.9: do not read these arrays when ItemCount is 0.
+    public int[] ProductIds { get; set; } = [];
+
+    public string[] ProductNames { get; set; } = [];
+
+    public int[] Units { get; set; } = [];
+
+    public double[] UnitPrices { get; set; } = [];
+
+    public string[] PictureUrls { get; set; } = [];
 }
 
 public sealed class OrderMutation

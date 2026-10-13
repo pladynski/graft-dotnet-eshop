@@ -29,10 +29,18 @@ public class FixUriService : IFixUriService
 
         try
         {
+            // Picture bytes now come from the catalog graft and are already a local file.
+            // Do not rewrite that path into the removed BFF /api/catalog/items/{id}/pic URL.
+            // Basket and campaign rows still rewrite a server IP to the phone's identity host.
             if (!_settingsService.UseMocks && _settingsService.GatewayCatalogEndpointBase != _settingsService.DefaultEndpoint)
             {
                 foreach (var catalogItem in catalogItems)
                 {
+                    if (string.IsNullOrEmpty(catalogItem.PictureUri) || LooksLikeLocalFile(catalogItem.PictureUri))
+                    {
+                        continue;
+                    }
+
                     catalogItem.PictureUri = Path.Combine(_settingsService.GatewayCatalogEndpointBase, $"api/catalog/items/{catalogItem.Id}/pic?{ApiVersion}");
                 }
             }
@@ -41,6 +49,12 @@ public class FixUriService : IFixUriService
         {
             Debug.WriteLine(ex.Message);
         }
+    }
+
+    private static bool LooksLikeLocalFile(string uri)
+    {
+        return uri.StartsWith("file:", StringComparison.OrdinalIgnoreCase)
+            || Path.IsPathRooted(uri);
     }
 
     public void FixBasketItemPictureUri(IEnumerable<BasketItem> basketItems)

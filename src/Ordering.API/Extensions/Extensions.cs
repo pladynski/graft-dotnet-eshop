@@ -6,12 +6,8 @@ internal static class Extensions
     {
         var services = builder.Services;
         
-        // Storefront graft methods validate the caller JWT themselves. Bearer middleware
-        // does not run on a graft invocation, so a Gateway host skips it.
-        if (!builder.Configuration.GetValue("EshopGraftHost", false))
-        {
-            builder.AddDefaultAuthentication();
-        }
+        // Order HTTP routes are gone. Graft methods validate the caller JWT themselves.
+        // There is no endpoint left that needs JWT bearer middleware.
 
         // Pooling is disabled because of the following error:
         // Unhandled exception. System.InvalidOperationException:

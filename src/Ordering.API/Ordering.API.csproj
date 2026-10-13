@@ -13,7 +13,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <InternalsVisibleTo Include="Ordering.FunctionalTests" />
     <InternalsVisibleTo Include="Ordering.UnitTests" />
   </ItemGroup>
 
@@ -27,7 +26,6 @@
 
   <ItemGroup>
     <PackageReference Include="Graftcode.Context" />
-    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
     <PackageReference Include="graft.nuget.basket.api_o573bl" />
     <PackageReference Include="graft.nuget.catalog.api_najknh" />
     <PackageReference Include="graft.nuget.paymentprocessor_bhabr6" />

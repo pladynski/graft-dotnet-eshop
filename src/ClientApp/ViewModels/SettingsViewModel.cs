@@ -55,17 +55,17 @@ public class SettingsViewModel : ViewModelBase
         GatewayCatalogEndpoint =
             !string.IsNullOrEmpty(_settingsService.GatewayCatalogEndpointBase)
                 ? _settingsService.GatewayCatalogEndpointBase
-                : $"http://{_baseAddress}:11632";
+                : GraftHosts.Default();
 
         GatewayBasketEndpoint =
             !string.IsNullOrEmpty(_settingsService.GatewayBasketEndpointBase)
                 ? _settingsService.GatewayBasketEndpointBase
-                : $"http://{_baseAddress}:5221";
+                : GraftHosts.Default();
 
         GatewayOrdersEndpoint =
             !string.IsNullOrEmpty(_settingsService.GatewayOrdersEndpointBase)
                 ? _settingsService.GatewayOrdersEndpointBase
-                : $"http://{_baseAddress}:11632";
+                : GraftHosts.Default();
 
         ToggleMockServicesCommand = new RelayCommand(ToggleMockServices);
 

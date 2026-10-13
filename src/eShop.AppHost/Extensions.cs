@@ -86,19 +86,13 @@ internal static class Extensions
     }
 
     public static IResourceBuilder<YarpResource> ConfigureMobileBffRoutes(this IResourceBuilder<YarpResource> builder,
-        IResourceBuilder<ProjectResource> orderingApi,
         IResourceBuilder<ProjectResource> identityApi)
     {
         return builder.WithConfiguration(yarp =>
         {
-            // Catalog HTTP is gone. The storefront calls CatalogApi over Graftcode Gateway.
-            // The MAUI client still speaks the old catalog REST paths and is outside this slice.
-
-            // Ordering routes
-            yarp.AddRoute("/api/orders/{*any}", orderingApi.GetEndpoint("http"))
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }]);
-
-            // Identity routes
+            // Catalog and ordering calls from the mobile apps are graft WebSocket calls.
+            // Identity stays on HTTP. The BFF still strips /identity for the OIDC authority
+            // when a client is pointed at the BFF instead of Identity directly.
             yarp.AddRoute("/identity/{*any}", identityApi.GetEndpoint("http"))
                 .WithTransformPathRemovePrefix("/identity");
         });
