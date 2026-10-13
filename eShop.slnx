@@ -5,7 +5,6 @@
     <Project Path="src/Catalog.API/Catalog.API.csproj" />
     <Project Path="src/eShop.ServiceDefaults/eShop.ServiceDefaults.csproj" />
     <Project Path="src/EventBus/EventBus.csproj" />
-    <Project Path="src/EventBusRabbitMQ/EventBusRabbitMQ.csproj" />
     <Project Path="src/Identity.API/Identity.API.csproj" />
     <Project Path="src/IntegrationEventLogEF/IntegrationEventLogEF.csproj" />
     <Project Path="src/Ordering.API/Ordering.API.csproj" />
@@ -22,10 +21,11 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Basket.UnitTests/Basket.UnitTests.csproj" />
+    <Project Path="tests/Basket.GraftTests/Basket.GraftTests.csproj" />
     <Project Path="tests/Basket.FunctionalTests/Basket.FunctionalTests.csproj" />
     <Project Path="tests/Application.UnitTests/Application.UnitTests.csproj" />
     <Project Path="tests/Catalog.FunctionalTests/Catalog.FunctionalTests.csproj" />
-    <Project Path="tests/Ordering.FunctionalTests/Ordering.FunctionalTests.csproj" />
+    <Project Path="tests/Ordering.GraftTests/Ordering.GraftTests.csproj" />
     <Project Path="tests/Ordering.UnitTests/Ordering.UnitTests.csproj" />
     <Project Path="tests/Webhooks.FunctionalTests/Webhooks.FunctionalTests.csproj" />
     <Project Path="tests/eShop.AppHost.UnitTests/eShop.AppHost.UnitTests.csproj" />

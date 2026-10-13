@@ -13,8 +13,10 @@ public class IdentityConfigurationTests
         var resources = Config.GetApis().Select(resource => resource.Name).Order().ToArray();
         var scopes = Config.GetApiScopes().Select(scope => scope.Name).Order().ToArray();
 
-        CollectionAssert.AreEqual(resources, scopes);
-        CollectionAssert.AreEquivalent(new[] { "basket", "orders", "webhooks" }, scopes);
+        // basket.internal is a scope on the basket resource, not its own API resource.
+        CollectionAssert.AreEquivalent(new[] { "basket", "orders", "webhooks" }, resources);
+        CollectionAssert.AreEquivalent(new[] { "basket", "basket.internal", "orders", "webhooks" }, scopes);
+        CollectionAssert.IsSubsetOf(resources, scopes);
     }
 
     [TestMethod]

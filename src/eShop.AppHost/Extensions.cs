@@ -1,4 +1,5 @@
-﻿using Aspire.Hosting.Eventing;
+﻿// Graftcode catalog slice — mobile BFF no longer proxies catalog HTTP.
+using Aspire.Hosting.Eventing;
 using Aspire.Hosting.Foundry;
 using Aspire.Hosting.Lifecycle;
 using Aspire.Hosting.Yarp;
@@ -85,67 +86,13 @@ internal static class Extensions
     }
 
     public static IResourceBuilder<YarpResource> ConfigureMobileBffRoutes(this IResourceBuilder<YarpResource> builder,
-        IResourceBuilder<ProjectResource> catalogApi,
-        IResourceBuilder<ProjectResource> orderingApi,
         IResourceBuilder<ProjectResource> identityApi)
     {
         return builder.WithConfiguration(yarp =>
         {
-            var catalogCluster = yarp.AddCluster(catalogApi);
-
-            yarp.AddRoute("/catalog-api/api/catalog/items", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/by", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/{id}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/by/{name}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/withsemanticrelevance/{text}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/withsemanticrelevance", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/type/{typeId}/brand/{brandId?}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/type/all/brand/{brandId?}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/catalogTypes", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/catalogBrands", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            yarp.AddRoute("/catalog-api/api/catalog/items/{id}/pic", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }])
-                .WithTransformPathRemovePrefix("/catalog-api");
-
-            // Generic catalog catch-all route
-            yarp.AddRoute("/api/catalog/{*any}", catalogCluster)
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1", "2.0"], Mode = QueryParameterMatchMode.Exact }]);
-
-            // Ordering routes
-            yarp.AddRoute("/api/orders/{*any}", orderingApi.GetEndpoint("http"))
-                .WithMatchRouteQueryParameter([new() { Name = "api-version", Values = ["1.0", "1"], Mode = QueryParameterMatchMode.Exact }]);
-
-            // Identity routes
+            // Catalog and ordering calls from the mobile apps are graft WebSocket calls.
+            // Identity stays on HTTP. The BFF still strips /identity for the OIDC authority
+            // when a client is pointed at the BFF instead of Identity directly.
             yarp.AddRoute("/identity/{*any}", identityApi.GetEndpoint("http"))
                 .WithTransformPathRemovePrefix("/identity");
         });

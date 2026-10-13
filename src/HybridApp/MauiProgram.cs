@@ -5,8 +5,8 @@ namespace eShop.HybridApp;
 
 public static class MauiProgram
 {
-    // NOTE: Must have a trailing slash on base URLs to ensure the full BaseAddress URL is used to resolve relative URLs
-    internal static string MobileBffHost = DeviceInfo.Platform == DevicePlatform.Android ? "http://10.0.2.2:11632/" : "http://localhost:11632/";
+    // Emulator host for the catalog graft. Android cannot reach the host machine as localhost.
+    internal static string CatalogGraftHost = DeviceInfo.Platform == DevicePlatform.Android ? "ws://10.0.2.2:8000/ws" : "ws://localhost:8000/ws";
 
 
     public static MauiApp CreateMauiApp()
@@ -27,8 +27,12 @@ public static class MauiProgram
 #endif
 
 
-        builder.Services.AddHttpClient<CatalogService>(o => o.BaseAddress = new(MobileBffHost));
-        builder.Services.AddSingleton<WebAppComponents.Services.IProductImageUrlProvider, ProductImageUrlProvider>();
+        // The shared catalog graft reads CATALOG_GRAFT_HOST in its static constructor.
+        Environment.SetEnvironmentVariable("CATALOG_GRAFT_HOST", CatalogGraftHost);
+        builder.Services.AddSingleton<eShop.WebAppComponents.Services.CatalogService>();
+        builder.Services.AddSingleton<CatalogService>();
+        builder.Services.AddSingleton<eShop.WebAppComponents.Services.ICatalogService>(sp => sp.GetRequiredService<CatalogService>());
+        builder.Services.AddSingleton<eShop.WebAppComponents.Services.IProductImageUrlProvider, ProductImageUrlProvider>();
 
         return builder.Build();
     }

@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-maccatalyst;net10.0</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- Tests on a machine without the iOS workload set this to net10.0. It does not change the default frameworks. -->
+    <TargetFrameworks Condition="'$(ClientAppTargetFrameworks)' != ''">$(ClientAppTargetFrameworks)</TargetFrameworks>
     <!-- Uncomment to also build the tizen app. You will need to install tizen by following this: https://github.com/Samsung/Tizen.NET -->
     <!-- <TargetFrameworks>$(TargetFrameworks);net10.0-tizen</TargetFrameworks> -->
 
@@ -61,12 +63,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Google.Protobuf" Version="3.29.3" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.67.0" />
-    <PackageReference Include="Grpc.Tools" Version="2.69.0">
-      <PrivateAssets>all</PrivateAssets>
-      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
-    </PackageReference>
+    <PackageReference Include="graft.nuget.catalog.api_najknh" Version="1.0.0" />
+    <PackageReference Include="graft.nuget.basket.api_o573bl" Version="1.0.0" />
+    <PackageReference Include="graft.nuget.ordering.api_o44m7i" Version="1.0.0" />
     <PackageReference Include="IdentityModel.OidcClient" Version="6.0.0" />
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.30" />
     <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="9.0.30" />
@@ -75,12 +74,6 @@
     <PackageReference Include="CommunityToolkit.Maui" Version="9.1.1" />
     <PackageReference Include="IdentityModel" Version="7.0.0" />
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.3.2" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Protobuf Include="Services\Basket\Protos\basket.proto" CompileOutputs="false" OutputDir="" GrpcServices="Client">
-      <Generator>MSBuild:Compile</Generator>
-    </Protobuf>
   </ItemGroup>
 
   <PropertyGroup Condition="$(TargetFramework.Contains('-android'))">

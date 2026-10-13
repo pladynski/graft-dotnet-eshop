@@ -97,7 +97,6 @@ public static class MauiProgram
         mauiAppBuilder.Services.AddSingleton<IAppEnvironmentService, AppEnvironmentService>(
             serviceProvider =>
             {
-                var requestProvider = serviceProvider.GetRequiredService<IRequestProvider>();
                 var fixUriService = serviceProvider.GetRequiredService<IFixUriService>();
                 var settingsService = serviceProvider.GetRequiredService<ISettingsService>();
                 var identityService = serviceProvider.GetRequiredService<IIdentityService>();
@@ -105,8 +104,8 @@ public static class MauiProgram
                 var aes =
                     new AppEnvironmentService(
                         new BasketMockService(), new BasketService(identityService, settingsService, fixUriService),
-                        new CatalogMockService(), new CatalogService(settingsService, requestProvider, fixUriService),
-                        new OrderMockService(), new OrderService(identityService, settingsService, requestProvider),
+                        new CatalogMockService(), new CatalogService(settingsService, fixUriService),
+                        new OrderMockService(), new OrderService(identityService, settingsService),
                         new IdentityMockService(), identityService);
 
                 aes.UpdateDependencies(settingsService.UseMocks);

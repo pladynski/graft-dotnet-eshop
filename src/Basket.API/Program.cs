@@ -1,14 +1,11 @@
-﻿var builder = WebApplication.CreateBuilder(args);
+﻿// Graftcode basket slice — Redis stays in Grpc/BasketService.
+// Storefront basket calls use that type through Graftcode Gateway, not gRPC.
+var builder = WebApplication.CreateBuilder(args);
 
 builder.AddBasicServiceDefaults();
 builder.AddApplicationServices();
 
-builder.Services.AddGrpc();
-
 var app = builder.Build();
 
 app.MapDefaultEndpoints();
-
-app.MapGrpcService<BasketService>();
-
 app.Run();

@@ -1,23 +1,21 @@
-using eShop.ClientApp.BasketGrpcClient;
+using eShop.ClientApp.Exceptions;
 using eShop.ClientApp.Models.Basket;
 using eShop.ClientApp.Services.FixUri;
 using eShop.ClientApp.Services.Identity;
 using eShop.ClientApp.Services.Settings;
-using Google.Protobuf;
-using Grpc.Core;
-using Grpc.Net.Client;
+using graft.nuget.Basket.API;
+using BasketApi = graft.nuget.eShop.Basket.API.BasketService;
+using BasketResult = graft.nuget.eShop.Basket.API.BasketResult;
 using BasketItem = eShop.ClientApp.Models.Basket.BasketItem;
 
 namespace eShop.ClientApp.Services.Basket;
 
-public class BasketService : IBasketService, IDisposable
+// Same basket operations as the gRPC client. The user access token is sent on that call only.
+public class BasketService : IBasketService
 {
     private readonly IFixUriService _fixUriService;
     private readonly IIdentityService _identityService;
     private readonly ISettingsService _settingsService;
-    private BasketGrpcClient.Basket.BasketClient _basketClient;
-
-    private GrpcChannel _channel;
 
     public BasketService(IIdentityService identityService, ISettingsService settingsService,
         IFixUriService fixUriService)
@@ -42,14 +40,21 @@ public class BasketService : IBasketService, IDisposable
 
         try
         {
-            var basketResponse = await GetBasketClient()
-                .GetBasketAsync(new GetBasketRequest(), CreateAuthenticationHeaders(authToken));
-            
-            if (basketResponse.IsInitialized() && basketResponse.Items.Any())
+            var basketResponse = Invoke(authToken, () => BasketApi.GetBasket());
+            if (basketResponse is null || !string.Equals(basketResponse.Status, "ok", StringComparison.Ordinal))
             {
-                foreach (var item in basketResponse.Items)
+                Console.WriteLine(basketResponse is null ? "basket failed" : basketResponse.Status + " " + basketResponse.Detail);
+                return null;
+            }
+
+            if (basketResponse.Count > 0)
+            {
+                var ids = basketResponse.ProductIds;
+                var quantities = basketResponse.Quantities;
+                var count = Math.Min(basketResponse.Count, Math.Min(ids.Length, quantities.Length));
+                for (var i = 0; i < count; i++)
                 {
-                    basket.AddItemToBasket(new BasketItem {ProductId = item.ProductId, Quantity = item.Quantity});
+                    basket.AddItemToBasket(new BasketItem { ProductId = ids[i], Quantity = quantities[i] });
                 }
             }
         }
@@ -72,25 +77,22 @@ public class BasketService : IBasketService, IDisposable
             return customerBasket;
         }
 
-        var updateBasketRequest = new UpdateBasketRequest();
+        var items = customerBasket?.Items?.ToArray() ?? [];
+        var result = Invoke(authToken, () => BasketApi.UpdateBasket(
+            items.Select(item => item.ProductId).ToArray(),
+            items.Select(item => item.Quantity).ToArray()));
+        ThrowIfRejected(result);
 
-        updateBasketRequest.Items.Add(
-            customerBasket.Items
-                .Select(
-                    x =>
-                        new BasketGrpcClient.BasketItem {ProductId = x.ProductId, Quantity = x.Quantity}));
-
-        var result = await GetBasketClient()
-            .UpdateBasketAsync(updateBasketRequest, CreateAuthenticationHeaders(authToken)).ConfigureAwait(false);
-
-        if (result.Items.Count > 0)
+        if (result.Count > 0)
         {
             customerBasket.ClearBasket();
-        }
-
-        foreach (var item in result.Items)
-        {
-            customerBasket.AddItemToBasket(new BasketItem {ProductId = item.ProductId, Quantity = item.Quantity});
+            var ids = result.ProductIds;
+            var quantities = result.Quantities;
+            var count = Math.Min(result.Count, Math.Min(ids.Length, quantities.Length));
+            for (var i = 0; i < count; i++)
+            {
+                customerBasket.AddItemToBasket(new BasketItem { ProductId = ids[i], Quantity = quantities[i] });
+            }
         }
 
         return customerBasket;
@@ -105,47 +107,42 @@ public class BasketService : IBasketService, IDisposable
             return;
         }
 
-        await GetBasketClient().DeleteBasketAsync(new DeleteBasketRequest(), CreateAuthenticationHeaders(authToken))
-            .ConfigureAwait(false);
+        var result = Invoke(authToken, () => BasketApi.DeleteBasket());
+        ThrowIfRejected(result);
     }
 
-    public void Dispose()
+    private void UseHost()
     {
-        Dispose(true);
-        GC.SuppressFinalize(this);
+        GraftConfig.Host = GraftHosts.Socket(_settingsService.GatewayBasketEndpointBase);
+        GraftConfig.Stateless = true;
     }
 
-    private BasketGrpcClient.Basket.BasketClient GetBasketClient()
+    private BasketResult Invoke(string token, Func<BasketResult> call)
     {
-        if (_basketClient is not null)
+        UseHost();
+        return GraftConfig.InvokeWithHeaders(call, new Dictionary<string, string>
         {
-            return _basketClient;
+            ["Authorization"] = "Bearer " + token
+        });
+    }
+
+    private static void ThrowIfRejected(BasketResult result)
+    {
+        if (result is null)
+        {
+            throw new ServiceAuthenticationException("Basket call failed.");
         }
 
-        _channel = GrpcChannel.ForAddress(_settingsService.GatewayBasketEndpointBase);
-
-        _basketClient = new BasketGrpcClient.Basket.BasketClient(_channel);
-
-        return _basketClient;
-    }
-
-    private Metadata CreateAuthenticationHeaders(string token)
-    {
-        var headers = new Metadata();
-        headers.Add("authorization", $"Bearer {token}");
-        return headers;
-    }
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (disposing)
+        if (string.Equals(result.Status, "unauthenticated", StringComparison.Ordinal)
+            || string.Equals(result.Status, "forbidden", StringComparison.Ordinal))
         {
-            _channel?.Dispose();
+            throw new ServiceAuthenticationException(result.Detail ?? result.Status);
         }
-    }
 
-    ~BasketService()
-    {
-        Dispose(false);
+        if (!string.Equals(result.Status, "ok", StringComparison.Ordinal)
+            && !string.Equals(result.Status, "deleted", StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(result.Detail ?? result.Status);
+        }
     }
 }

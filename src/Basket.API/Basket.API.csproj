@@ -6,19 +6,17 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Aspire.StackExchange.Redis" />
-    <PackageReference Include="Grpc.AspNetCore" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Protobuf Include="Proto\basket.proto" GrpcServices="Server" />
+    <PackageReference Include="Graftcode.Context" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\eShop.ServiceDefaults\eShop.ServiceDefaults.csproj" />
-    <ProjectReference Include="..\EventBusRabbitMQ\EventBusRabbitMQ.csproj" />
+    <ProjectReference Include="..\EventBus\EventBus.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Basket.FunctionalTests" />
+    <InternalsVisibleTo Include="Basket.UnitTests" />
   </ItemGroup>
 </Project>

@@ -6,8 +6,8 @@ internal static class Extensions
     {
         var services = builder.Services;
         
-        // Add the authentication services to DI
-        builder.AddDefaultAuthentication();
+        // Order HTTP routes are gone. Graft methods validate the caller JWT themselves.
+        // There is no endpoint left that needs JWT bearer middleware.
 
         // Pooling is disabled because of the following error:
         // Unhandled exception. System.InvalidOperationException:
@@ -24,9 +24,6 @@ internal static class Extensions
         services.AddTransient<IIntegrationEventLogService, IntegrationEventLogService<OrderingContext>>();
 
         services.AddTransient<IOrderingIntegrationEventService, OrderingIntegrationEventService>();
-
-        builder.AddRabbitMqEventBus("eventbus")
-               .AddEventBusSubscriptions();
 
         services.AddHttpContextAccessor();
         services.AddTransient<IIdentityService, IdentityService>();
@@ -48,14 +45,5 @@ internal static class Extensions
         services.AddScoped<IBuyerRepository, BuyerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IRequestManager, RequestManager>();
-    }
-
-    private static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
-    {
-        eventBus.AddSubscription<GracePeriodConfirmedIntegrationEvent, GracePeriodConfirmedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStockConfirmedIntegrationEvent, OrderStockConfirmedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderStockRejectedIntegrationEvent, OrderStockRejectedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderPaymentFailedIntegrationEvent, OrderPaymentFailedIntegrationEventHandler>();
-        eventBus.AddSubscription<OrderPaymentSucceededIntegrationEvent, OrderPaymentSucceededIntegrationEventHandler>();
     }
 }

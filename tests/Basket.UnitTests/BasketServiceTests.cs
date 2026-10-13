@@ -1,86 +1,99 @@
-﻿using System.Security.Claims;
-using eShop.Basket.API.Repositories;
-using eShop.Basket.API.Grpc;
+﻿using eShop.Basket.API;
 using eShop.Basket.API.IntegrationEvents.EventHandling;
 using eShop.Basket.API.IntegrationEvents.EventHandling.Events;
 using eShop.Basket.API.Model;
-using eShop.Basket.UnitTests.Helpers;
+using eShop.Basket.API.Repositories;
+using Graftcode.Context;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Grpc.Core;
-using BasketItem = eShop.Basket.API.Model.BasketItem;
 
 namespace eShop.Basket.UnitTests;
 
 [TestClass]
 public class BasketServiceTests
 {
+    private static TokenAuthority authority = null!;
+
     public TestContext TestContext { get; set; } = null!;
 
-    [TestMethod]
-    public async Task GetBasketReturnsEmptyForNoUser()
+    [ClassInitialize]
+    public static async Task StartAuthority(TestContext _)
     {
-        var mockRepository = Substitute.For<IBasketRepository>();
-        var service = new BasketService(mockRepository, NullLogger<BasketService>.Instance);
-        var serverCallContext = TestServerCallContext.Create(cancellationToken: TestContext.CancellationToken);
-        serverCallContext.SetUserState("__HttpContext", new DefaultHttpContext());
+        authority = await TokenAuthority.StartAsync();
+    }
 
-        var response = await service.GetBasket(new GetBasketRequest(), serverCallContext);
-
-        Assert.IsInstanceOfType<CustomerBasketResponse>(response);
-        Assert.IsEmpty(response.Items);
+    [ClassCleanup]
+    public static async Task StopAuthority()
+    {
+        if (authority is not null)
+        {
+            await authority.DisposeAsync();
+        }
     }
 
     [TestMethod]
-    public async Task GetBasketReturnsItemsForValidUserId()
+    public void GetBasketReturnsEmptyForNoUser()
     {
-        var mockRepository = Substitute.For<IBasketRepository>();
-        List<BasketItem> items = [new BasketItem { Id = "some-id" }];
-        mockRepository.GetBasketAsync("1").Returns(Task.FromResult(new CustomerBasket { BuyerId = "1", Items = items }));
-        var service = new BasketService(mockRepository, NullLogger<BasketService>.Instance);
-        var serverCallContext = TestServerCallContext.Create(cancellationToken: TestContext.CancellationToken);
-        var httpContext = new DefaultHttpContext();
-        httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", "1")]));
-        serverCallContext.SetUserState("__HttpContext", httpContext);
+        var repository = Substitute.For<IBasketRepository>();
+        var result = Call(repository, null, () => BasketService.GetBasket());
 
-        var response = await service.GetBasket(new GetBasketRequest(), serverCallContext);
-
-        Assert.IsInstanceOfType<CustomerBasketResponse>(response);
-        Assert.HasCount(1, response.Items);
+        Assert.AreEqual(0, result.Count);
+        Assert.AreEqual("ok", result.Status);
+        repository.DidNotReceive().GetBasketAsync(Arg.Any<string>());
     }
 
     [TestMethod]
-    public async Task GetBasketReturnsEmptyForInvalidUserId()
+    public void GetBasketReturnsItemsForTheVerifiedSubject()
     {
-        var mockRepository = Substitute.For<IBasketRepository>();
-        List<BasketItem> items = [new BasketItem { Id = "some-id" }];
-        mockRepository.GetBasketAsync("1").Returns(Task.FromResult(new CustomerBasket { BuyerId = "1", Items = items }));
-        var service = new BasketService(mockRepository, NullLogger<BasketService>.Instance);
-        var serverCallContext = TestServerCallContext.Create(cancellationToken: TestContext.CancellationToken);
-        var httpContext = new DefaultHttpContext();
-        serverCallContext.SetUserState("__HttpContext", httpContext);
+        var repository = Substitute.For<IBasketRepository>();
+        repository.GetBasketAsync("buyer-a").Returns(Task.FromResult(new CustomerBasket
+        {
+            BuyerId = "buyer-a",
+            Items = [new BasketItem { Id = "some-id", ProductId = 7, Quantity = 2 }]
+        }));
 
-        var response = await service.GetBasket(new GetBasketRequest(), serverCallContext);
+        var token = authority.Issue("buyer-a", BasketTokens.UserScope);
+        var result = Call(repository, token, () => BasketService.GetBasket());
 
-        Assert.IsInstanceOfType<CustomerBasketResponse>(response);
-        Assert.IsEmpty(response.Items);
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual(7, result.ProductIds[0]);
+        Assert.AreEqual(2, result.Quantities[0]);
+        repository.DidNotReceive().GetBasketAsync("buyer-b");
     }
 
     [TestMethod]
-    public async Task UpdateBasketPersistsItemsForAuthenticatedUser()
+    public void GetBasketDoesNotReadWhenTheTokenIsInvalid()
+    {
+        var repository = Substitute.For<IBasketRepository>();
+        repository.GetBasketAsync("buyer-a").Returns(Task.FromResult(new CustomerBasket
+        {
+            BuyerId = "buyer-a",
+            Items = [new BasketItem { Id = "some-id", ProductId = 7, Quantity = 2 }]
+        }));
+
+        var token = authority.Issue("buyer-a", BasketTokens.UserScope, otherKey: true);
+        var result = Call(repository, token, () => BasketService.GetBasket());
+
+        Assert.AreEqual(0, result.Count);
+        Assert.AreEqual("unauthenticated", result.Status);
+        repository.DidNotReceive().GetBasketAsync(Arg.Any<string>());
+    }
+
+    [TestMethod]
+    public async Task UpdateBasketPersistsItemsForTheVerifiedSubject()
     {
         var repository = Substitute.For<IBasketRepository>();
         repository.UpdateBasketAsync(Arg.Any<CustomerBasket>())
             .Returns(call => call.Arg<CustomerBasket>());
-        var service = new BasketService(repository, NullLogger<BasketService>.Instance);
-        var context = CreateContext("buyer-1");
-        var request = new UpdateBasketRequest();
-        request.Items.Add(new eShop.Basket.API.Grpc.BasketItem { ProductId = 42, Quantity = 3 });
 
-        var response = await service.UpdateBasket(request, context);
+        var token = authority.Issue("buyer-1", "openid basket");
+        var result = Call(repository, token, () => BasketService.UpdateBasket([42], [3]));
 
-        Assert.HasCount(1, response.Items);
-        Assert.AreEqual(42, response.Items[0].ProductId);
-        Assert.AreEqual(3, response.Items[0].Quantity);
+        Assert.AreEqual(1, result.Count);
+        Assert.AreEqual(42, result.ProductIds[0]);
+        Assert.AreEqual(3, result.Quantities[0]);
         await repository.Received(1).UpdateBasketAsync(Arg.Is<CustomerBasket>(basket =>
             basket.BuyerId == "buyer-1" &&
             basket.Items.Count == 1 &&
@@ -92,12 +105,22 @@ public class BasketServiceTests
     public async Task UpdateBasketRejectsAnonymousUser()
     {
         var repository = Substitute.For<IBasketRepository>();
-        var service = new BasketService(repository, NullLogger<BasketService>.Instance);
 
-        var exception = await Assert.ThrowsAsync<RpcException>(() =>
-            service.UpdateBasket(new UpdateBasketRequest(), CreateContext(null!)));
+        var result = Call(repository, null, () => BasketService.UpdateBasket([], []));
 
-        Assert.AreEqual(StatusCode.Unauthenticated, exception.StatusCode);
+        Assert.AreEqual("unauthenticated", result.Status);
+        await repository.DidNotReceive().UpdateBasketAsync(Arg.Any<CustomerBasket>());
+    }
+
+    [TestMethod]
+    public async Task UpdateBasketRejectsExpiredToken()
+    {
+        var repository = Substitute.For<IBasketRepository>();
+        var token = authority.Issue("buyer-1", BasketTokens.UserScope, DateTime.UtcNow.AddMinutes(-10));
+
+        var result = Call(repository, token, () => BasketService.UpdateBasket([1], [1]));
+
+        Assert.AreEqual("unauthenticated", result.Status);
         await repository.DidNotReceive().UpdateBasketAsync(Arg.Any<CustomerBasket>());
     }
 
@@ -107,23 +130,47 @@ public class BasketServiceTests
         var repository = Substitute.For<IBasketRepository>();
         repository.UpdateBasketAsync(Arg.Any<CustomerBasket>())
             .Returns(Task.FromResult<CustomerBasket>(null!));
-        var service = new BasketService(repository, NullLogger<BasketService>.Instance);
 
-        var exception = await Assert.ThrowsAsync<RpcException>(() =>
-            service.UpdateBasket(new UpdateBasketRequest(), CreateContext("missing")));
+        var token = authority.Issue("missing", BasketTokens.UserScope);
+        var result = Call(repository, token, () => BasketService.UpdateBasket([], []));
 
-        Assert.AreEqual(StatusCode.NotFound, exception.StatusCode);
+        Assert.AreEqual("notFound", result.Status);
     }
 
     [TestMethod]
-    public async Task DeleteBasketRemovesAuthenticatedUsersBasket()
+    public async Task DeleteBasketRemovesTheVerifiedUsersBasket()
     {
         var repository = Substitute.For<IBasketRepository>();
-        var service = new BasketService(repository, NullLogger<BasketService>.Instance);
+        var token = authority.Issue("buyer-1", BasketTokens.UserScope);
 
-        await service.DeleteBasket(new DeleteBasketRequest(), CreateContext("buyer-1"));
+        var result = Call(repository, token, () => BasketService.DeleteBasket());
 
+        Assert.AreEqual("deleted", result.Status);
         await repository.Received(1).DeleteBasketAsync("buyer-1");
+    }
+
+    [TestMethod]
+    public async Task OnOrderStartedDeletesBasketForTheOrderingScope()
+    {
+        var repository = Substitute.For<IBasketRepository>();
+        var token = authority.Issue("ordering", BasketTokens.ServiceScope);
+
+        var result = Call(repository, token, () => BasketService.OnOrderStarted("buyer-1"));
+
+        Assert.AreEqual("deleted", result.Status);
+        await repository.Received(1).DeleteBasketAsync("buyer-1");
+    }
+
+    [TestMethod]
+    public async Task UserScopeCannotDeleteAnotherBasketThroughOnOrderStarted()
+    {
+        var repository = Substitute.For<IBasketRepository>();
+        var token = authority.Issue("buyer-a", BasketTokens.UserScope);
+
+        var result = Call(repository, token, () => BasketService.OnOrderStarted("buyer-b"));
+
+        Assert.AreEqual("forbidden", result.Status);
+        await repository.DidNotReceive().DeleteBasketAsync(Arg.Any<string>());
     }
 
     [TestMethod]
@@ -139,15 +186,42 @@ public class BasketServiceTests
         await repository.Received(1).DeleteBasketAsync("buyer-1");
     }
 
-    private TestServerCallContext CreateContext(string userId)
+    private static BasketResult Call(IBasketRepository repository, string token, Func<BasketResult> action)
     {
-        var context = TestServerCallContext.Create(cancellationToken: TestContext.CancellationToken);
-        var httpContext = new DefaultHttpContext();
-        if (userId is not null)
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string>
+            {
+                ["Identity:Url"] = authority.Issuer,
+                ["Identity:Audience"] = TokenAuthority.Audience
+            })
+            .Build();
+        var services = new ServiceCollection();
+        services.AddSingleton(repository);
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddSingleton<ILogger<BasketService>>(NullLogger<BasketService>.Instance);
+        using var provider = services.BuildServiceProvider();
+        using var _ = BasketService.Attach(provider);
+        UseAuthorization(token);
+        try
         {
-            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim("sub", userId)]));
+            return action();
         }
-        context.SetUserState("__HttpContext", httpContext);
-        return context;
+        finally
+        {
+            UseAuthorization(null);
+        }
+    }
+
+    private static void UseAuthorization(string token)
+    {
+        var context = new RequestContext();
+        var headers = new Dictionary<string, string>();
+        if (!string.IsNullOrEmpty(token))
+        {
+            headers["authorization"] = "Bearer " + token;
+        }
+
+        context.SetHeaders(headers);
+        RequestContext.Current = context;
     }
 }

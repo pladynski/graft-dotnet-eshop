@@ -82,29 +82,25 @@ public class BasketState(
             checkoutInfo.RequestId = Guid.NewGuid();
         }
 
-        var buyerId = await authenticationStateProvider.GetBuyerIdAsync() ?? throw new InvalidOperationException("User does not have a buyer ID");
+        // The ordering graft derives the buyer from the access token. Do not send a buyer id.
+        _ = await authenticationStateProvider.GetBuyerIdAsync() ?? throw new InvalidOperationException("User does not have a buyer ID");
         var userName = await authenticationStateProvider.GetUserNameAsync() ?? throw new InvalidOperationException("User does not have a user name");
 
-        // Get details for the items in the basket
         var orderItems = await FetchBasketItemsAsync();
-
-        // Call into Ordering.API to create the order using those details
-        var request = new CreateOrderRequest(
-            UserId: buyerId,
-            UserName: userName,
-            City: checkoutInfo.City!,
-            Street: checkoutInfo.Street!,
-            State: checkoutInfo.State!,
-            Country: checkoutInfo.Country!,
-            ZipCode: checkoutInfo.ZipCode!,
-            CardNumber: "1111222233334444",
-            CardHolderName: "TESTUSER",
-            CardExpiration: DateTime.UtcNow.AddYears(1),
-            CardSecurityNumber: "111",
-            CardTypeId: checkoutInfo.CardTypeId,
-            Buyer: buyerId,
-            Items: [.. orderItems]);
-        await orderingService.CreateOrder(request, checkoutInfo.RequestId);
+        await orderingService.CreateOrder(
+            userName,
+            checkoutInfo.City!,
+            checkoutInfo.Street!,
+            checkoutInfo.State!,
+            checkoutInfo.Country!,
+            checkoutInfo.ZipCode!,
+            "1111222233334444",
+            "TESTUSER",
+            DateTime.UtcNow.AddYears(1),
+            "111",
+            checkoutInfo.CardTypeId,
+            orderItems,
+            checkoutInfo.RequestId);
         await DeleteBasketAsync();
     }
 
@@ -140,6 +136,7 @@ public class BasketState(
                     ProductName = catalogItem.Name,
                     UnitPrice = catalogItem.Price,
                     Quantity = item.Quantity,
+                    PictureUrl = catalogItem.PictureUrl ?? string.Empty,
                 };
                 basketItems.Add(orderItem);
             }
@@ -154,19 +151,3 @@ public class BasketState(
         public void Dispose() => Owner._changeSubscriptions.Remove(this);
     }
 }
-
-public record CreateOrderRequest(
-    string UserId,
-    string UserName,
-    string City,
-    string Street,
-    string State,
-    string Country,
-    string ZipCode,
-    string CardNumber,
-    string CardHolderName,
-    DateTime CardExpiration,
-    string CardSecurityNumber,
-    int CardTypeId,
-    string Buyer,
-    List<BasketItem> Items);

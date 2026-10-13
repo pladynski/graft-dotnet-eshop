@@ -1,9 +1,33 @@
 ﻿namespace eShop.Ordering.API.Application.IntegrationEvents.EventHandling;
-public class OrderStockRejectedIntegrationEventHandler(
-    IMediator mediator,
-    ILogger<OrderStockRejectedIntegrationEventHandler> logger) : IIntegrationEventHandler<OrderStockRejectedIntegrationEvent>
+
+// Does not implement IIntegrationEventHandler<T>. That contract is a positional record, and gg 1.4.9 fails the NuGet build when a hosted type exposes one.
+public class OrderStockRejectedIntegrationEventHandler
 {
-    public async Task Handle(OrderStockRejectedIntegrationEvent @event)
+    private readonly IMediator mediator;
+    private readonly ILogger<OrderStockRejectedIntegrationEventHandler> logger;
+
+    private OrderStockRejectedIntegrationEventHandler(
+        IMediator mediator,
+        ILogger<OrderStockRejectedIntegrationEventHandler> logger)
+    {
+        this.mediator = mediator;
+        this.logger = logger;
+    }
+
+    public static GraftStatus OnStockRejected(int orderId, int[] productIds) =>
+        GraftHost.Block(async provider =>
+        {
+            await Apply(provider, orderId, productIds ?? []).ConfigureAwait(false);
+            return new GraftStatus("ok");
+        });
+
+    internal static Task Apply(IServiceProvider provider, int orderId, IEnumerable<int> productIds)
+    {
+        var items = productIds.Select(id => new ConfirmedOrderStockItem(id, false)).ToList();
+        return Create(provider).Handle(new OrderStockRejectedIntegrationEvent(orderId, items));
+    }
+
+    private async Task Handle(OrderStockRejectedIntegrationEvent @event)
     {
         logger.LogInformation("Handling integration event: {IntegrationEventId} - ({@IntegrationEvent})", @event.Id, @event);
 
@@ -23,4 +47,9 @@ public class OrderStockRejectedIntegrationEventHandler(
 
         await mediator.Send(command);
     }
+
+    private static OrderStockRejectedIntegrationEventHandler Create(IServiceProvider provider) =>
+        new(
+            provider.GetRequiredService<IMediator>(),
+            provider.GetRequiredService<ILogger<OrderStockRejectedIntegrationEventHandler>>());
 }

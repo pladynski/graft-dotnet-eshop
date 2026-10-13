@@ -132,7 +132,7 @@
                 </Entry.Style>
             </Entry>
 
-            <Label Style="{StaticResource HeaderLabelStyle}" Text="Gateway Catalog Url" />
+            <Label Style="{StaticResource HeaderLabelStyle}" Text="Catalog graft Url" />
             <Entry Text="{Binding GatewayCatalogEndpoint, Mode=TwoWay}">
                 <Entry.Style>
                     <OnPlatform x:TypeArguments="Style">
@@ -142,7 +142,7 @@
                 </Entry.Style>
             </Entry>
 
-            <Label Style="{StaticResource HeaderLabelStyle}" Text="Gateway Orders Url" />
+            <Label Style="{StaticResource HeaderLabelStyle}" Text="Orders graft Url" />
             <Entry Text="{Binding GatewayOrdersEndpoint, Mode=TwoWay}">
                 <Entry.Style>
                     <OnPlatform x:TypeArguments="Style">
@@ -152,7 +152,7 @@
                 </Entry.Style>
             </Entry>
 
-            <Label Style="{StaticResource HeaderLabelStyle}" Text="Gateway Basket Url" />
+            <Label Style="{StaticResource HeaderLabelStyle}" Text="Basket graft Url" />
             <Entry Text="{Binding GatewayBasketEndpoint, Mode=TwoWay}">
                 <Entry.Style>
                     <OnPlatform x:TypeArguments="Style">

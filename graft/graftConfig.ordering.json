@@ -1,0 +1,18 @@
+{
+  "configurations": {
+    "graft.nuget.Ordering.API": {
+      "runtime": "netcore",
+      "host": "localhost:5672",
+      "stateless": true,
+      "plugin": {
+        "name": "RabbitmqPlugin",
+        "queue": "eshop.ordering",
+        "replyQueue": "eshop.ordering.reply",
+        "user": "guest",
+        "password": "guest",
+        "vhost": "/",
+        "rpcTimeoutMs": 30000
+      }
+    }
+  }
+}
