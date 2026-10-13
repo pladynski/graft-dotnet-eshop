@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Text;
 using eShop.Basket.UnitTests;
 using graft.nuget.Ordering.API;
+using OrderLine = graft.nuget.eShop.Ordering.API.OrderLine;
 using OrderList = graft.nuget.eShop.Ordering.API.OrderList;
 using OrderMutation = graft.nuget.eShop.Ordering.API.OrderMutation;
 using OrdersApi = graft.nuget.eShop.Ordering.API.OrdersApi;
@@ -69,6 +70,11 @@ public class OrderingGatewayTests
 
         var hit = Call(token, () => OrdersApi.GetOrder(created.OrderNumber));
         Assert.AreEqual(1, hit.Found);
+        Assert.AreEqual("1 Microsoft Way", hit.Street);
+        Assert.AreEqual(1, hit.ItemCount);
+        Assert.AreEqual(1, hit.Items[0].ProductId);
+        Assert.AreEqual("pic-1.png", hit.Items[0].PictureUrl);
+        Assert.AreEqual(1, hit.Items[0].Units);
         Call(token, () => OrdersApi.CancelOrder(created.OrderNumber, Guid.NewGuid().ToString("D")));
     }
 
@@ -122,6 +128,10 @@ public class OrderingGatewayTests
         Assert.AreEqual(1, stillMine.Found);
         Assert.AreEqual(createdA.OrderNumber, stillMine.OrderNumber);
         Assert.AreEqual("Submitted", stillMine.OrderStatus);
+        Assert.AreEqual("Redmond", stillMine.City);
+        Assert.AreEqual(1, stillMine.ItemCount);
+        Assert.AreEqual(11, stillMine.Items[0].ProductId);
+        Assert.AreEqual("pic-11.png", stillMine.Items[0].PictureUrl);
     }
 
     [TestMethod]
@@ -232,10 +242,7 @@ public class OrderingGatewayTests
             DateTime.UtcNow.AddYears(1).ToString("o"),
             "111",
             1,
-            [productId],
-            ["Product"],
-            [1],
-            [10d]);
+            [new OrderLine(productId, "Product", 1, 10d, "pic-" + productId + ".png")]);
 
     private static T Call<T>(string token, Func<T> action)
     {
@@ -345,7 +352,7 @@ public class OrderingGatewayTests
         var module = Path.Combine(publish, "Ordering.API.dll");
         var start = new ProcessStartInfo(
             "gg",
-            "--runtime netcore --modules \"" + module + "\" --types eShop.Ordering.API.OrdersApi,eShop.Ordering.API.OrderList,eShop.Ordering.API.OrderHit,eShop.Ordering.API.OrderMutation --port " + port + " --httpPort " + httpPort)
+            "--runtime netcore --modules \"" + module + "\" --types eShop.Ordering.API.OrdersApi,eShop.Ordering.API.OrderList,eShop.Ordering.API.OrderHit,eShop.Ordering.API.OrderMutation,eShop.Ordering.API.OrderLine --port " + port + " --httpPort " + httpPort)
         {
             RedirectStandardOutput = true,
             RedirectStandardError = true,

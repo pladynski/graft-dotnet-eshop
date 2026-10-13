@@ -225,7 +225,7 @@ public static class OrdersApi
 
             var total = order.OrderItems.Sum(item => item.UnitPrice * item.Units);
             var hit = new OrderHit(1, order.Id, order.OrderDate.ToString("o"), order.OrderStatus.ToString(), (double)total, "ok", null);
-            // Same fields the HTTP order document returned to MAUI. Callers skip the arrays when ItemCount is 0.
+            // Same fields the HTTP order document returned to MAUI. Callers skip Items when ItemCount is 0.
             var address = order.Address;
             hit.Street = address?.Street ?? string.Empty;
             hit.City = address?.City ?? string.Empty;
@@ -236,11 +236,12 @@ public static class OrdersApi
             hit.ItemCount = items.Count;
             if (items.Count > 0)
             {
-                hit.ProductIds = items.Select(item => item.ProductId).ToArray();
-                hit.ProductNames = items.Select(item => item.ProductName ?? string.Empty).ToArray();
-                hit.Units = items.Select(item => item.Units).ToArray();
-                hit.UnitPrices = items.Select(item => (double)item.UnitPrice).ToArray();
-                hit.PictureUrls = items.Select(item => item.PictureUrl ?? string.Empty).ToArray();
+                hit.Items = items.Select(item => new OrderLine(
+                    item.ProductId,
+                    item.ProductName,
+                    item.Units,
+                    (double)item.UnitPrice,
+                    item.PictureUrl)).ToArray();
             }
 
             return hit;
@@ -302,10 +303,7 @@ public static class OrdersApi
         string cardExpiration,
         string cardSecurityNumber,
         int cardTypeId,
-        int[] productIds,
-        string[] productNames,
-        int[] units,
-        double[] unitPrices)
+        OrderLine[] lines)
     {
         var authorization = CurrentAuthorization();
         return Run(async provider =>
@@ -326,12 +324,8 @@ public static class OrdersApi
                 return new OrderMutation("badRequest", "Card expiration is invalid.", 0);
             }
 
-            var ids = productIds ?? [];
-            var names = productNames ?? [];
-            var quantities = units ?? [];
-            var prices = unitPrices ?? [];
-            var count = Math.Min(Math.Min(ids.Length, names.Length), Math.Min(quantities.Length, prices.Length));
-            if (count == 0 || count != ids.Length || count != names.Length || count != quantities.Length || count != prices.Length)
+            var rows = lines ?? [];
+            if (rows.Length == 0 || rows.Any(row => row is null))
             {
                 return new OrderMutation("badRequest", "Order items are missing.", 0);
             }
@@ -340,16 +334,17 @@ public static class OrdersApi
             var masked = number.Length >= 4
                 ? number.Substring(number.Length - 4).PadLeft(number.Length, 'X')
                 : number;
-            var items = new List<BasketItem>(count);
-            for (var i = 0; i < count; i++)
+            var items = new List<BasketItem>(rows.Length);
+            foreach (var line in rows)
             {
                 items.Add(new BasketItem
                 {
                     Id = Guid.NewGuid().ToString("N"),
-                    ProductId = ids[i],
-                    ProductName = names[i] ?? string.Empty,
-                    UnitPrice = (decimal)prices[i],
-                    Quantity = quantities[i]
+                    ProductId = line.ProductId,
+                    ProductName = line.ProductName ?? string.Empty,
+                    UnitPrice = (decimal)line.UnitPrice,
+                    Quantity = line.Units,
+                    PictureUrl = line.PictureUrl ?? string.Empty
                 });
             }
 
@@ -555,16 +550,35 @@ public sealed class OrderHit
 
     public int ItemCount { get; set; }
 
-    // gg 1.4.9: do not read these arrays when ItemCount is 0.
-    public int[] ProductIds { get; set; } = [];
+    // gg 1.4.9: an empty complex array throws in ComplexTypeResolver.Register.
+    // Callers skip Items when ItemCount is 0.
+    public OrderLine[] Items { get; set; } = [];
+}
 
-    public string[] ProductNames { get; set; } = [];
+public sealed class OrderLine
+{
+    public OrderLine()
+    {
+    }
 
-    public int[] Units { get; set; } = [];
+    public OrderLine(int productId, string productName, int units, double unitPrice, string pictureUrl)
+    {
+        ProductId = productId;
+        ProductName = productName ?? string.Empty;
+        Units = units;
+        UnitPrice = unitPrice;
+        PictureUrl = pictureUrl ?? string.Empty;
+    }
 
-    public double[] UnitPrices { get; set; } = [];
+    public int ProductId { get; set; }
 
-    public string[] PictureUrls { get; set; } = [];
+    public string ProductName { get; set; } = string.Empty;
+
+    public int Units { get; set; }
+
+    public double UnitPrice { get; set; }
+
+    public string PictureUrl { get; set; } = string.Empty;
 }
 
 public sealed class OrderMutation

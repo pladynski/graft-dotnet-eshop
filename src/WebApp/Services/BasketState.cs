@@ -136,6 +136,7 @@ public class BasketState(
                     ProductName = catalogItem.Name,
                     UnitPrice = catalogItem.Price,
                     Quantity = item.Quantity,
+                    PictureUrl = catalogItem.PictureUrl ?? string.Empty,
                 };
                 basketItems.Add(orderItem);
             }

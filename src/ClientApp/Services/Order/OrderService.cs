@@ -7,8 +7,8 @@ using eShop.ClientApp.Services.Identity;
 using eShop.ClientApp.Services.RequestProvider;
 using eShop.ClientApp.Services.Settings;
 using graft.nuget.Ordering.API;
-using Hypertube.Netcore.Utils.ConnectionData;
 using OrderHit = graft.nuget.eShop.Ordering.API.OrderHit;
+using OrderLine = graft.nuget.eShop.Ordering.API.OrderLine;
 using OrderList = graft.nuget.eShop.Ordering.API.OrderList;
 using OrdersApi = graft.nuget.eShop.Ordering.API.OrdersApi;
 
@@ -50,10 +50,12 @@ public class OrderService : IOrderService
             (newOrder?.CardExpiration ?? default).ToString("o", CultureInfo.InvariantCulture),
             newOrder?.CardSecurityNumber ?? string.Empty,
             newOrder?.CardTypeId ?? 0,
-            lines.Select(item => (int)item.ProductId).ToArray(),
-            lines.Select(item => item.ProductName ?? string.Empty).ToArray(),
-            lines.Select(item => item.Quantity).ToArray(),
-            lines.Select(item => (double)item.UnitPrice).ToArray()));
+            lines.Select(item => new OrderLine(
+                (int)item.ProductId,
+                item.ProductName ?? string.Empty,
+                item.Quantity,
+                (double)item.UnitPrice,
+                item.PictureUrl ?? string.Empty)).ToArray()));
         ThrowIfRejected(result?.Status, result?.Detail, result?.Status);
         if (!string.Equals(result?.Status, "created", StringComparison.Ordinal))
         {
@@ -199,167 +201,51 @@ public class OrderService : IOrderService
             OrderDate = DateTime.Parse(hit.Date, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind),
             OrderStatus = hit.OrderStatus,
             Total = (decimal)hit.Total,
-            ShippingStreet = Text(hit, "Street"),
-            ShippingCity = Text(hit, "City"),
-            ShippingState = Text(hit, "State"),
-            ShippingCountry = Text(hit, "Country"),
-            ShippingZipCode = Text(hit, "ZipCode"),
+            ShippingStreet = hit.Street ?? string.Empty,
+            ShippingCity = hit.City ?? string.Empty,
+            ShippingState = hit.State ?? string.Empty,
+            ShippingCountry = hit.Country ?? string.Empty,
+            ShippingZipCode = hit.ZipCode ?? string.Empty,
             OrderItems = ReadItems(hit)
         };
         return order;
     }
 
-    // The checked-in ordering graft was generated before OrderHit grew address and line fields.
-    // gg 1.4.9 sees those fields on the server. The generated OrderHit already exposes the same
-    // field call its other getters use, so the order screen can bind them without a new package.
-    private static string Text(OrderHit hit, string name)
-    {
-        try
-        {
-            return Field(hit, name) as string ?? string.Empty;
-        }
-        catch
-        {
-            return string.Empty;
-        }
-    }
-
     private static List<OrderItem> ReadItems(OrderHit hit)
     {
-        int count;
-        try
-        {
-            count = Convert.ToInt32(Field(hit, "ItemCount"), CultureInfo.InvariantCulture);
-        }
-        catch
+        // gg 1.4.9: an empty complex array throws. Do not read Items when ItemCount is 0.
+        if (hit is null || hit.ItemCount <= 0)
         {
             return [];
         }
 
-        // gg 1.4.9: an empty int[] property throws. Do not read the arrays when ItemCount is 0.
-        if (count <= 0)
+        var rows = hit.Items;
+        if (rows is null || rows.Length == 0)
         {
             return [];
         }
 
-        try
+        var take = Math.Min(hit.ItemCount, rows.Length);
+        var items = new List<OrderItem>(take);
+        for (var i = 0; i < take; i++)
         {
-            var names = Strings(Field(hit, "ProductNames"));
-            var units = Ints(Field(hit, "Units"));
-            var prices = Doubles(Field(hit, "UnitPrices"));
-            if (names is null || units is null || prices is null)
+            var row = rows[i];
+            if (row is null)
             {
-                return [];
+                continue;
             }
 
-            string[] pictures = null;
-            int[] ids = null;
-            try
+            items.Add(new OrderItem
             {
-                pictures = Strings(Field(hit, "PictureUrls"));
-            }
-            catch
-            {
-                pictures = null;
-            }
-
-            try
-            {
-                ids = Ints(Field(hit, "ProductIds"));
-            }
-            catch
-            {
-                ids = null;
-            }
-
-            var take = Math.Min(count, Math.Min(names.Length, Math.Min(units.Length, prices.Length)));
-            var items = new List<OrderItem>(take);
-            for (var i = 0; i < take; i++)
-            {
-                items.Add(new OrderItem
-                {
-                    ProductId = ids is null || i >= ids.Length ? 0 : ids[i],
-                    ProductName = names[i],
-                    Quantity = units[i],
-                    UnitPrice = (decimal)prices[i],
-                    PictureUrl = pictures is null || i >= pictures.Length ? null : pictures[i]
-                });
-            }
-
-            return items;
-        }
-        catch
-        {
-            return [];
-        }
-    }
-
-    private static object Field(OrderHit hit, string name)
-    {
-        return hit.InvocationContextInstance.GetInstanceField(name).Execute((IConnectionData)null).GetValue();
-    }
-
-    private static string[] Strings(object value)
-    {
-        if (value is string[] typed)
-        {
-            return typed;
+                ProductId = row.ProductId,
+                ProductName = row.ProductName,
+                Quantity = row.Units,
+                UnitPrice = (decimal)row.UnitPrice,
+                PictureUrl = row.PictureUrl
+            });
         }
 
-        if (value is not object[] objects)
-        {
-            return null;
-        }
-
-        var result = new string[objects.Length];
-        for (var i = 0; i < objects.Length; i++)
-        {
-            result[i] = objects[i] as string ?? string.Empty;
-        }
-
-        return result;
-    }
-
-    private static int[] Ints(object value)
-    {
-        if (value is int[] typed)
-        {
-            return typed;
-        }
-
-        if (value is not object[] objects)
-        {
-            return null;
-        }
-
-        var result = new int[objects.Length];
-        for (var i = 0; i < objects.Length; i++)
-        {
-            result[i] = Convert.ToInt32(objects[i], CultureInfo.InvariantCulture);
-        }
-
-        return result;
-    }
-
-    private static double[] Doubles(object value)
-    {
-        if (value is double[] typed)
-        {
-            return typed;
-        }
-
-        if (value is not object[] objects)
-        {
-            return null;
-        }
-
-        var result = new double[objects.Length];
-        for (var i = 0; i < objects.Length; i++)
-        {
-            result[i] = Convert.ToDouble(objects[i], CultureInfo.InvariantCulture);
-        }
-
-        return result;
+        return items;
     }
 
     private static void ThrowIfRejected(string status, string detail, string raw)

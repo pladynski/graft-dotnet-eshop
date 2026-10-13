@@ -4,9 +4,8 @@
 using System.Globalization;
 using graft.nuget.Ordering.API;
 using Microsoft.AspNetCore.Authentication;
-using OrderHit = graft.nuget.eShop.Ordering.API.OrderHit;
+using OrderLine = graft.nuget.eShop.Ordering.API.OrderLine;
 using OrderList = graft.nuget.eShop.Ordering.API.OrderList;
-using OrderMutation = graft.nuget.eShop.Ordering.API.OrderMutation;
 using OrdersApi = graft.nuget.eShop.Ordering.API.OrdersApi;
 
 namespace eShop.WebApp.Services;
@@ -66,10 +65,12 @@ public class OrderingService(IHttpContextAccessor httpContextAccessor)
             cardExpiration.ToString("o", CultureInfo.InvariantCulture),
             cardSecurityNumber ?? string.Empty,
             cardTypeId,
-            lines.Select(item => item.ProductId).ToArray(),
-            lines.Select(item => item.ProductName ?? string.Empty).ToArray(),
-            lines.Select(item => item.Quantity).ToArray(),
-            lines.Select(item => (double)item.UnitPrice).ToArray()));
+            lines.Select(item => new OrderLine(
+                item.ProductId,
+                item.ProductName ?? string.Empty,
+                item.Quantity,
+                (double)item.UnitPrice,
+                item.PictureUrl ?? string.Empty)).ToArray()));
         ThrowIfRejected(result?.Status, result?.Detail);
         if (!string.Equals(result?.Status, "created", StringComparison.Ordinal))
         {

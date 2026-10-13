@@ -17,7 +17,7 @@
 
   <ItemGroup>
     <PackageReference Include="graft.nuget.basket.api_o573bl" />
-    <PackageReference Include="graft.nuget.ordering.api_lio0wl" />
+    <PackageReference Include="graft.nuget.ordering.api_o44m7i" />
     <PackageReference Include="Asp.Versioning.Http.Client" />
     <PackageReference Include="Aspire.Azure.AI.OpenAI" />
     <PackageReference Include="CommunityToolkit.Aspire.OllamaSharp" />

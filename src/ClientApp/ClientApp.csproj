@@ -3,6 +3,8 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-maccatalyst;net10.0</TargetFrameworks>
     <TargetFrameworks Condition="$([MSBuild]::IsOSPlatform('windows'))">$(TargetFrameworks);net10.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- Tests on a machine without the iOS workload set this to net10.0. It does not change the default frameworks. -->
+    <TargetFrameworks Condition="'$(ClientAppTargetFrameworks)' != ''">$(ClientAppTargetFrameworks)</TargetFrameworks>
     <!-- Uncomment to also build the tizen app. You will need to install tizen by following this: https://github.com/Samsung/Tizen.NET -->
     <!-- <TargetFrameworks>$(TargetFrameworks);net10.0-tizen</TargetFrameworks> -->
 
@@ -63,7 +65,7 @@
   <ItemGroup>
     <PackageReference Include="graft.nuget.catalog.api_najknh" Version="1.0.0" />
     <PackageReference Include="graft.nuget.basket.api_o573bl" Version="1.0.0" />
-    <PackageReference Include="graft.nuget.ordering.api_lio0wl" Version="1.0.0" />
+    <PackageReference Include="graft.nuget.ordering.api_o44m7i" Version="1.0.0" />
     <PackageReference Include="IdentityModel.OidcClient" Version="6.0.0" />
     <PackageReference Include="Microsoft.Maui.Controls" Version="9.0.30" />
     <PackageReference Include="Microsoft.Maui.Controls.Compatibility" Version="9.0.30" />
